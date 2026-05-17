@@ -1,4 +1,4 @@
-# animation-video-learning-skills
+# animation-explainer
 
 > 把看不见的技术过程，做成能看见的剧场式动画 HTML。
 
@@ -7,7 +7,7 @@
 ## 现在能干什么
 
 ```
-animation-video-learning-skills/
+animation-explainer/
 ├─ SKILL.md                         # 技能定义 + 工作流 + 反 AI slop 清单
 ├─ package.json                     # msedge-tts + playwright 依赖
 ├─ scripts/
