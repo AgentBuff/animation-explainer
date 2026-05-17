@@ -1,0 +1,1523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vue 3 原理之旅 — 从 .vue 到屏幕上的像素</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #060912; --surface: #0e1525; --surface-2: #131c33;
+    --border: #21304d; --border-soft: rgba(120,140,200,0.12);
+    --text: #e8edf7; --text-dim: #a8b3cc; --muted: #6a7693;
+    --cyan: #22d3ee; --violet: #a78bfa; --lime: #a3e635;
+    --amber: #fbbf24; --rose: #fb7185; --emerald: #34d399;
+    --vue: #42b883; --vue-dark: #35495e;
+    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-display: 'Inter Tight', 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  }
+  *,*::before,*::after{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; height:100%; }
+  body{
+    font-family: var(--font-sans); color: var(--text);
+    background:
+      radial-gradient(1200px 800px at 70% -10%, rgba(66,184,131,0.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(34,211,238,0.08), transparent 60%),
+      linear-gradient(180deg, #060912 0%, #04060e 100%);
+    background-attachment: fixed; overflow: hidden;
+  }
+  body::before{
+    content:""; position: fixed; inset:0; pointer-events: none; z-index:0;
+    background-image:
+      linear-gradient(rgba(120,140,200,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,140,200,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .app{
+    position: relative; z-index: 1;
+    display: grid; grid-template-rows: auto 1fr auto;
+    height: 100vh; max-width: 1280px; margin: 0 auto;
+    padding: 18px 28px; gap: 14px;
+  }
+
+  .topbar{ display: flex; align-items: center; gap: 18px; }
+  .brand{ display:flex; align-items:center; gap: 10px; font-family: var(--font-display); font-weight:700; }
+  .brand .dot{ width:10px; height:10px; border-radius:50%;
+    background: linear-gradient(135deg, var(--vue), var(--cyan));
+    box-shadow: 0 0 18px rgba(66,184,131,0.7); }
+  .brand .title{ font-size: 15px; }
+  .brand .sub{ color: var(--muted); font-size: 12px; font-weight:500; margin-left:8px; }
+
+  .progress{ flex:1; display:flex; align-items:center; gap:12px; }
+  .progress .bar{ flex:1; height:4px; background: var(--surface);
+    border:1px solid var(--border-soft); border-radius: 999px; position: relative; overflow:hidden; }
+  .progress .bar .fill{ position:absolute; inset:0; width:0%;
+    background: linear-gradient(90deg, var(--vue), var(--cyan));
+    border-radius:999px; transition: width 0.4s ease; }
+  .progress .label{ font-family: var(--font-mono); font-size:12px; color: var(--text-dim); min-width: 38px; text-align: right; }
+  .chips{ display:flex; gap:4px; }
+  .chip{ width:26px; height:18px; border-radius:5px; background: var(--surface);
+    border:1px solid var(--border-soft); cursor:pointer; transition: all 0.2s; }
+  .chip:hover{ background: var(--surface-2); border-color: var(--border); }
+  .chip.done{ background: rgba(66,184,131,0.18); border-color: rgba(66,184,131,0.5); }
+  .chip.active{ background: linear-gradient(135deg, rgba(66,184,131,0.30), rgba(34,211,238,0.25));
+    border-color: var(--vue); box-shadow: 0 0 12px rgba(66,184,131,0.4); }
+
+  .stage-wrap{ display:grid; grid-template-columns: minmax(0, 1.55fr) minmax(360px, 1fr); gap:16px; min-height:0; }
+  .stage{ position:relative;
+    background: radial-gradient(800px 500px at 30% 20%, rgba(66,184,131,0.05), transparent 60%), var(--surface);
+    border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+  .stage svg.scene{ position:absolute; inset:0; width:100%; height:100%;
+    opacity:0; pointer-events:none; transition: opacity 0.4s ease; }
+  .stage svg.scene.active{ opacity:1; pointer-events:auto; }
+  .stage-corner{ position:absolute; top:12px; left:14px; font-family: var(--font-mono); font-size:11px; color: var(--muted); letter-spacing: 0.05em; }
+  .stage-time{ position:absolute; bottom:12px; right:14px; font-family: var(--font-mono); font-size:11px; color: var(--muted); }
+
+  .narrate{ background: var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding: 22px; display:flex; flex-direction:column; min-height:0; overflow:auto; }
+  .narrate .scene-num{ font-family: var(--font-mono); font-size:11px; letter-spacing:0.15em; color: var(--vue); text-transform:uppercase; }
+  .narrate h2{ font-family: var(--font-display); font-weight:700; font-size:24px; line-height:1.15; letter-spacing:-0.02em; margin:6px 0 12px; }
+  .narrate .body{ color: var(--text-dim); font-size:14px; line-height:1.65; margin-bottom:14px; }
+  .narrate .body em{ color: var(--text); font-style:normal;
+    background: linear-gradient(180deg, transparent 60%, rgba(66,184,131,0.25) 60%); padding:0 2px; }
+  .narrate .body code{ font-family: var(--font-mono); font-size:12.5px; color: var(--vue);
+    background: rgba(66,184,131,0.08); border:1px solid rgba(66,184,131,0.20); border-radius:4px; padding:1px 5px; }
+  .codeblk{ background:#06090f; border:1px solid var(--border); border-radius:10px;
+    padding:12px 14px; font-family: var(--font-mono); font-size:12px; line-height:1.65; color: var(--text-dim);
+    overflow:auto; max-height:240px; position:relative;
+    white-space: pre; tab-size: 2; -moz-tab-size: 2; }
+  .codeblk::before{ content: attr(data-lang); position:absolute; top:8px; right:12px;
+    font-size:10px; color: var(--muted); text-transform:uppercase; letter-spacing:0.1em; }
+  .codeblk .k { color: var(--violet); }
+  .codeblk .s { color: var(--lime); }
+  .codeblk .n { color: var(--amber); }
+  .codeblk .c { color: var(--muted); font-style: italic; }
+  .codeblk .h { color: var(--cyan); font-weight: 600; }
+  .codeblk .v { color: var(--text); }
+  .codeblk .g { color: var(--vue); font-weight: 600; }
+  .narrate .pane{ display:none; }
+  .narrate .pane.active{ display:block; }
+
+  .controls{ display:flex; align-items:center; gap:10px; background: var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 12px; }
+  .btn{ appearance:none; background: var(--surface-2); color: var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:7px 13px; font: 500 13px var(--font-sans); cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px; transition: all 0.15s; }
+  .btn:hover{ background:#1a2240; border-color:#2c3a5e; }
+  .btn:active{ transform: translateY(1px); }
+  .btn.primary{ background: linear-gradient(135deg, rgba(66,184,131,0.20), rgba(34,211,238,0.18)); border-color: rgba(66,184,131,0.4); }
+  .btn .kbd{ font-family: var(--font-mono); font-size:10px; color: var(--muted);
+    border:1px solid var(--border-soft); border-radius:3px; padding:1px 4px; }
+  .ctrl-spacer{ flex:1; }
+  .chapter-title{ font-size:12.5px; color: var(--text-dim); }
+  .chapter-title b{ color: var(--text); font-weight:600; }
+
+  svg.scene .node-box{ fill: var(--surface-2); stroke: var(--border); stroke-width: 1.2; }
+  svg.scene .node-text{ font-family: var(--font-sans); fill: var(--text); font-size: 13px; font-weight: 500; }
+  svg.scene .node-sub{ font-family: var(--font-mono); fill: var(--muted); font-size: 11px; }
+  svg.scene .label{ font-family: var(--font-mono); fill: var(--text-dim); font-size: 10.5px; }
+
+  /* pulse 动画用于 activeEffect 中心 */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.06); }
+  }
+  .pulse { transform-origin: center; transform-box: fill-box; animation: pulse 1.6s ease-in-out infinite; }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .spin-slow { transform-origin: center; transform-box: fill-box; animation: spin 8s linear infinite; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="vueGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#42b883"/><stop offset="1" stop-color="#35495e"/>
+    </linearGradient>
+    <marker id="ar-vue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#42b883"/>
+    </marker>
+    <marker id="ar-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#22d3ee"/>
+    </marker>
+    <marker id="ar-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#a78bfa"/>
+    </marker>
+    <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#fbbf24"/>
+    </marker>
+    <marker id="ar-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#fb7185"/>
+    </marker>
+    <marker id="ar-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#a3e635"/>
+    </marker>
+    <marker id="ar-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#21304d"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="title">Vue 3 原理之旅</span>
+      <span class="sub">从 .vue 到屏幕上的像素 · 8 节</span>
+    </div>
+    <div class="progress">
+      <div class="chips" id="chips"></div>
+      <div class="bar"><div class="fill" id="progressFill"></div></div>
+      <div class="label" id="progressLabel">1/8</div>
+    </div>
+  </header>
+
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <div class="stage-corner"><span id="cornerIx">SCENE 01</span></div>
+      <div class="stage-time" id="stageTime">00:00 / 00:00</div>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 1 · 一个 .vue 文件
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-1" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 编辑器窗口 -->
+        <g transform="translate(60,40)">
+          <rect width="680" height="420" rx="10" fill="#0a1224" stroke="#21304d" stroke-width="1.5"/>
+          <!-- title bar -->
+          <rect width="680" height="34" rx="10" fill="#0e1525"/>
+          <rect y="24" width="680" height="10" fill="#0e1525"/>
+          <circle cx="18" cy="17" r="5" fill="#fb7185"/>
+          <circle cx="36" cy="17" r="5" fill="#fbbf24"/>
+          <circle cx="54" cy="17" r="5" fill="#34d399"/>
+          <!-- tab -->
+          <g transform="translate(100,4)">
+            <rect width="140" height="26" rx="4" fill="#131c33" stroke="#42b883" stroke-width="1"/>
+            <circle cx="14" cy="13" r="4" fill="#42b883"/>
+            <text x="26" y="17" font-family="JetBrains Mono" font-size="11" fill="#e8edf7">Counter.vue</text>
+          </g>
+
+          <!-- 行号 -->
+          <g font-family="JetBrains Mono" font-size="11" fill="#3d4a6a" text-anchor="end">
+            <text x="36" y="68"> 1</text><text x="36" y="84"> 2</text><text x="36" y="100"> 3</text>
+            <text x="36" y="116"> 4</text><text x="36" y="132"> 5</text><text x="36" y="148"> 6</text>
+            <text x="36" y="164"> 7</text><text x="36" y="180"> 8</text><text x="36" y="196"> 9</text>
+            <text x="36" y="212">10</text><text x="36" y="228">11</text><text x="36" y="244">12</text>
+            <text x="36" y="260">13</text><text x="36" y="276">14</text><text x="36" y="292">15</text>
+            <text x="36" y="308">16</text><text x="36" y="324">17</text><text x="36" y="340">18</text>
+            <text x="36" y="356">19</text><text x="36" y="372">20</text>
+          </g>
+
+          <!-- 三块高亮背景 -->
+          <rect id="block-tmpl" x="50" y="56" width="620" height="80" rx="4" fill="rgba(34,211,238,0.04)" opacity="0"/>
+          <rect id="block-scr"  x="50" y="148" width="620" height="120" rx="4" fill="rgba(167,139,250,0.05)" opacity="0"/>
+          <rect id="block-sty"  x="50" y="280" width="620" height="80" rx="4" fill="rgba(251,191,36,0.04)" opacity="0"/>
+
+          <!-- 代码 -->
+          <g font-family="JetBrains Mono" font-size="12">
+            <text x="52" y="68" fill="#22d3ee">&lt;template&gt;</text>
+            <text x="52" y="84" fill="#a8b3cc">  &lt;div class="counter"&gt;</text>
+            <text x="52" y="100" fill="#a8b3cc">    &lt;h1&gt;Count: {{ count }}&lt;/h1&gt;</text>
+            <text x="52" y="116" fill="#a8b3cc">    &lt;button @click="count++"&gt;+1&lt;/button&gt;</text>
+            <text x="52" y="132" fill="#a8b3cc">  &lt;/div&gt;</text>
+            <text x="52" y="148" fill="#22d3ee">&lt;/template&gt;</text>
+
+            <text x="52" y="180" fill="#a78bfa">&lt;script setup&gt;</text>
+            <text x="52" y="196" fill="#a8b3cc">  <tspan fill="#a78bfa">import</tspan> { ref } <tspan fill="#a78bfa">from</tspan> <tspan fill="#a3e635">'vue'</tspan></text>
+            <text x="52" y="212" fill="#a8b3cc">  <tspan fill="#a78bfa">const</tspan> <tspan fill="#fbbf24">count</tspan> = <tspan fill="#22d3ee">ref</tspan>(<tspan fill="#fbbf24">0</tspan>)</text>
+            <text x="52" y="244" fill="#a78bfa">&lt;/script&gt;</text>
+
+            <text x="52" y="276" fill="#fbbf24">&lt;style scoped&gt;</text>
+            <text x="52" y="292" fill="#a8b3cc">  .counter { padding: 20px; }</text>
+            <text x="52" y="308" fill="#a8b3cc">  h1 { color: #42b883; }</text>
+            <text x="52" y="324" fill="#fbbf24">&lt;/style&gt;</text>
+          </g>
+
+          <!-- 三块说明标签 -->
+          <g opacity="0" id="block-labels">
+            <g transform="translate(560,66)">
+              <rect width="92" height="20" rx="4" fill="#0e1525" stroke="#22d3ee" stroke-width="1"/>
+              <text x="46" y="14" font-family="JetBrains Mono" font-size="10" fill="#22d3ee" text-anchor="middle">UI 模板</text>
+            </g>
+            <g transform="translate(560,166)">
+              <rect width="92" height="20" rx="4" fill="#0e1525" stroke="#a78bfa" stroke-width="1"/>
+              <text x="46" y="14" font-family="JetBrains Mono" font-size="10" fill="#a78bfa" text-anchor="middle">响应式逻辑</text>
+            </g>
+            <g transform="translate(560,286)">
+              <rect width="92" height="20" rx="4" fill="#0e1525" stroke="#fbbf24" stroke-width="1"/>
+              <text x="46" y="14" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" text-anchor="middle">作用域样式</text>
+            </g>
+          </g>
+        </g>
+
+        <text x="400" y="485" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          SFC（Single File Component）— Vue 把三种语言塞进同一个文件
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 2 · 编译器：Template → Render Function
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-2" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 流水线四阶段 -->
+        <g transform="translate(40,80)">
+          <!-- Stage 1: Template 文本 -->
+          <g id="cmp-1">
+            <rect class="node-box" width="160" height="80" rx="8"/>
+            <text class="node-text" x="80" y="22" text-anchor="middle" font-size="12">Template 源码</text>
+            <text x="14" y="44" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc">&lt;div&gt;</text>
+            <text x="14" y="56" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc">  &lt;h1&gt;{{ count }}&lt;/h1&gt;</text>
+            <text x="14" y="68" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc">&lt;/div&gt;</text>
+          </g>
+          <path id="cmp-a1" d="M168 40 L188 40" stroke="#42b883" stroke-width="1.5" marker-end="url(#ar-vue)" opacity="0"/>
+
+          <!-- Stage 2: AST -->
+          <g id="cmp-2" transform="translate(196,0)">
+            <rect class="node-box" width="160" height="80" rx="8"/>
+            <text class="node-text" x="80" y="22" text-anchor="middle" font-size="12">AST 树</text>
+            <g font-family="JetBrains Mono" font-size="9" fill="#fbbf24">
+              <text x="14" y="42">{ type: ELEMENT,</text>
+              <text x="14" y="54">  tag: "div",</text>
+              <text x="14" y="66">  children: [...] }</text>
+            </g>
+          </g>
+          <path id="cmp-a2" d="M364 40 L384 40" stroke="#42b883" stroke-width="1.5" marker-end="url(#ar-vue)" opacity="0"/>
+
+          <!-- Stage 3: 优化（静态提升 + patchFlag） -->
+          <g id="cmp-3" transform="translate(392,0)">
+            <rect class="node-box" width="160" height="80" rx="8"/>
+            <text class="node-text" x="80" y="22" text-anchor="middle" font-size="12">Transform 优化</text>
+            <text x="14" y="44" font-family="JetBrains Mono" font-size="9" fill="#a3e635">+ static hoisting</text>
+            <text x="14" y="56" font-family="JetBrains Mono" font-size="9" fill="#a3e635">+ patchFlag</text>
+            <text x="14" y="68" font-family="JetBrains Mono" font-size="9" fill="#a3e635">+ blockTree</text>
+          </g>
+          <path id="cmp-a3" d="M560 40 L580 40" stroke="#42b883" stroke-width="1.5" marker-end="url(#ar-vue)" opacity="0"/>
+
+          <!-- Stage 4: Render Function -->
+          <g id="cmp-4" transform="translate(588,0)">
+            <rect class="node-box" width="160" height="80" rx="8"/>
+            <text class="node-text" x="80" y="22" text-anchor="middle" font-size="12">render()</text>
+            <g font-family="JetBrains Mono" font-size="9" fill="#22d3ee">
+              <text x="14" y="42">() =&gt; h("div", null,</text>
+              <text x="14" y="54">  h("h1", null,</text>
+              <text x="14" y="66">    _ctx.count))</text>
+            </g>
+          </g>
+        </g>
+
+        <!-- 详细输出（编译产物示意） -->
+        <g transform="translate(40,200)" id="cmp-output" opacity="0">
+          <rect width="720" height="240" rx="10" fill="#06090f" stroke="#21304d" stroke-width="1"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#6a7693" letter-spacing="0.1em">// COMPILED OUTPUT (vue-template-compiler)</text>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="14" y="46" fill="#a78bfa">const</text>
+            <text x="56" y="46" fill="#e8edf7">_hoisted_1 = </text>
+            <text x="148" y="46" fill="#22d3ee">/*#__PURE__*/</text>
+            <text x="240" y="46" fill="#e8edf7">_createElementVNode(</text>
+            <text x="404" y="46" fill="#a3e635">"button"</text>
+            <text x="450" y="46" fill="#e8edf7">, null, </text>
+            <text x="506" y="46" fill="#a3e635">"+1"</text>
+            <text x="528" y="46" fill="#e8edf7">)</text>
+            <text x="14" y="64" fill="#6a7693">// ↑ 静态节点被提升到 render 之外，只创建一次</text>
+
+            <text x="14" y="96" fill="#a78bfa">export function</text>
+            <text x="124" y="96" fill="#fbbf24">render</text>
+            <text x="170" y="96" fill="#e8edf7">(_ctx, _cache) {</text>
+            <text x="14" y="114" fill="#e8edf7">  return (_openBlock(), _createElementBlock(</text>
+            <text x="14" y="132" fill="#e8edf7">    </text>
+            <text x="30" y="132" fill="#a3e635">"div"</text>
+            <text x="60" y="132" fill="#e8edf7">, {</text>
+            <text x="78" y="132" fill="#22d3ee">class</text>
+            <text x="108" y="132" fill="#e8edf7">: </text>
+            <text x="122" y="132" fill="#a3e635">"counter"</text>
+            <text x="170" y="132" fill="#e8edf7">}, [</text>
+            <text x="14" y="150" fill="#e8edf7">      _createElementVNode(</text>
+            <text x="174" y="150" fill="#a3e635">"h1"</text>
+            <text x="198" y="150" fill="#e8edf7">, null, </text>
+            <text x="254" y="150" fill="#a3e635">"Count: "</text>
+            <text x="316" y="150" fill="#e8edf7"> + _toDisplayString(_ctx.count), </text>
+            <text x="570" y="150" fill="#fb7185" font-weight="700">1</text>
+            <text x="582" y="150" fill="#6a7693"> /* TEXT */</text>
+            <text x="14" y="168" fill="#e8edf7">      ),</text>
+            <text x="14" y="186" fill="#e8edf7">      _hoisted_1   </text>
+            <text x="128" y="186" fill="#6a7693">// ← 复用静态节点</text>
+            <text x="14" y="204" fill="#e8edf7">    ]))</text>
+            <text x="14" y="222" fill="#e8edf7">}</text>
+          </g>
+        </g>
+
+        <text x="400" y="485" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          编译期就把"哪些会变"标好（patchFlag = 1 表示文本会变），运行时跳过对比
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 3 · reactive() · Proxy 包装
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-3" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 左：原始对象 -->
+        <g transform="translate(80,180)">
+          <rect class="node-box" width="170" height="130" rx="8"/>
+          <text class="node-text" x="85" y="22" text-anchor="middle" font-size="12">原始对象</text>
+          <text x="85" y="40" font-family="JetBrains Mono" font-size="10" fill="#6a7693" text-anchor="middle">target</text>
+          <line x1="20" y1="50" x2="150" y2="50" stroke="#21304d" stroke-width="1"/>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="20" y="72" fill="#e8edf7">count: </text>
+            <text x="70" y="72" fill="#fbbf24" font-weight="700">0</text>
+            <text x="20" y="92" fill="#e8edf7">name: </text>
+            <text x="60" y="92" fill="#a3e635">"Counter"</text>
+            <text x="20" y="112" fill="#e8edf7">items: </text>
+            <text x="64" y="112" fill="#a8b3cc">[ ... ]</text>
+          </g>
+        </g>
+
+        <!-- Proxy 包装环 -->
+        <g id="proxyRing" opacity="0">
+          <rect x="60" y="160" width="210" height="170" rx="16" fill="none" stroke="#42b883" stroke-width="2.5" stroke-dasharray="6 4" filter="url(#softglow)" class="spin-slow"/>
+          <g transform="translate(70,150)">
+            <rect width="80" height="20" rx="4" fill="#0e1525" stroke="#42b883" stroke-width="1"/>
+            <text x="40" y="14" font-family="JetBrains Mono" font-size="10" fill="#42b883" text-anchor="middle" font-weight="700">PROXY</text>
+          </g>
+        </g>
+
+        <!-- 中：reactive() 调用 -->
+        <g id="reactiveCall" opacity="0" transform="translate(330,210)">
+          <rect class="node-box" width="140" height="70" rx="8" stroke="#42b883" stroke-width="1.5"/>
+          <text x="70" y="22" font-family="JetBrains Mono" font-size="12" fill="#42b883" text-anchor="middle" font-weight="700">reactive()</text>
+          <text x="70" y="42" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">new Proxy(target,</text>
+          <text x="70" y="56" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">  baseHandlers)</text>
+        </g>
+
+        <!-- 右：用户访问 -->
+        <g id="userAccess" opacity="0" transform="translate(540,180)">
+          <rect class="node-box" width="220" height="130" rx="8"/>
+          <text x="110" y="22" font-family="Inter" font-size="12" fill="#22d3ee" text-anchor="middle" font-weight="600">用户代码</text>
+          <line x1="20" y1="36" x2="200" y2="36" stroke="#21304d" stroke-width="1"/>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="20" y="58" fill="#a8b3cc">// 读</text>
+            <text x="20" y="76" fill="#e8edf7">state.<tspan fill="#fbbf24">count</tspan></text>
+            <text x="20" y="100" fill="#a8b3cc">// 写</text>
+            <text x="20" y="118" fill="#e8edf7">state.<tspan fill="#fbbf24">count</tspan> = <tspan fill="#fbbf24">5</tspan></text>
+          </g>
+        </g>
+
+        <!-- Proxy 拦截器代码 -->
+        <g id="trapBox" opacity="0" transform="translate(80,360)">
+          <rect width="680" height="100" rx="10" fill="#06090f" stroke="#42b883" stroke-width="1.2"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#42b883" letter-spacing="0.1em">// PROXY HANDLER (packages/reactivity/src/baseHandlers.ts)</text>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="14" y="46" fill="#e8edf7"><tspan fill="#a78bfa">get</tspan>(target, key) {</text>
+            <text x="14" y="62" fill="#e8edf7">  </text><text x="30" y="62" fill="#fb7185" font-weight="700">track</text><text x="58" y="62" fill="#e8edf7">(target, key)         </text><text x="270" y="62" fill="#6a7693">// 收集"谁在读"</text>
+            <text x="14" y="78" fill="#e8edf7">  </text><text x="30" y="78" fill="#a78bfa">return</text><text x="76" y="78" fill="#e8edf7"> Reflect.get(target, key)</text>
+            <text x="14" y="94" fill="#e8edf7">},</text>
+
+            <text x="380" y="46" fill="#e8edf7"><tspan fill="#a78bfa">set</tspan>(target, key, value) {</text>
+            <text x="380" y="62" fill="#e8edf7">  Reflect.set(target, key, value)</text>
+            <text x="380" y="78" fill="#e8edf7">  </text><text x="396" y="78" fill="#fb7185" font-weight="700">trigger</text><text x="436" y="78" fill="#e8edf7">(target, key)       </text><text x="600" y="78" fill="#6a7693">// 通知</text>
+            <text x="380" y="94" fill="#e8edf7">}</text>
+          </g>
+        </g>
+
+        <!-- 飞行箭头：用户访问 → Proxy → target -->
+        <path id="accessArrow" d="M540 245 L270 245" stroke="#22d3ee" stroke-width="2" stroke-dasharray="4 4" fill="none" marker-end="url(#ar-cyan)" opacity="0"/>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 4 · track · 依赖收集
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-4" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- effect 函数（左上） -->
+        <g id="effectBox" transform="translate(40,40)">
+          <rect width="220" height="92" rx="10" fill="rgba(251,191,36,0.06)" stroke="#fbbf24" stroke-width="1.5" class="pulse"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">EFFECT (currently running)</text>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="14" y="44" fill="#a78bfa">effect</text>
+            <text x="50" y="44" fill="#e8edf7">(() =&gt; {</text>
+            <text x="14" y="60" fill="#e8edf7">  render(`Count: ${ </text>
+            <text x="146" y="60" fill="#fbbf24" font-weight="700" id="readCount">state.count</text>
+            <text x="216" y="60" fill="#e8edf7"> }`)</text>
+            <text x="14" y="76" fill="#e8edf7">})</text>
+          </g>
+        </g>
+
+        <!-- 响应式对象 state（右上） -->
+        <g transform="translate(530,40)">
+          <rect class="node-box" width="220" height="92" rx="10" stroke="#42b883" stroke-width="1.5"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#42b883" letter-spacing="0.1em">REACTIVE STATE</text>
+          <g font-family="JetBrains Mono" font-size="12">
+            <text x="14" y="44" fill="#e8edf7" id="prop-count">state.<tspan fill="#fbbf24">count</tspan>: 0</text>
+            <text x="14" y="62" fill="#e8edf7" id="prop-name">state.<tspan fill="#a3e635">name</tspan>: "..."</text>
+            <text x="14" y="80" fill="#e8edf7" id="prop-items">state.<tspan fill="#22d3ee">items</tspan>: []</text>
+          </g>
+        </g>
+
+        <!-- 收集箭头：从 state.count 指向 effect -->
+        <path id="trackArrow" d="M530 70 Q400 100 260 70" stroke="#42b883" stroke-width="2" fill="none" marker-end="url(#ar-vue)" opacity="0"/>
+        <text id="trackLabel" x="395" y="106" font-family="JetBrains Mono" font-size="11" fill="#42b883" text-anchor="middle" opacity="0" font-weight="600">track(state, "count")</text>
+
+        <!-- targetMap 数据结构 -->
+        <g transform="translate(40,180)" id="targetMapBox" opacity="0">
+          <text x="0" y="-4" font-family="JetBrains Mono" font-size="10" fill="#6a7693" letter-spacing="0.1em">DEPENDENCY GRAPH (targetMap)</text>
+          <rect width="720" height="260" rx="10" fill="#06090f" stroke="#21304d" stroke-width="1"/>
+
+          <!-- 三层结构 -->
+          <g transform="translate(20,20)">
+            <!-- L1: WeakMap -->
+            <g id="tm-l1">
+              <rect width="140" height="56" rx="6" fill="#0e1525" stroke="#a78bfa" stroke-width="1"/>
+              <text x="70" y="22" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" text-anchor="middle" font-weight="700">WeakMap</text>
+              <text x="70" y="40" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc" text-anchor="middle">targetMap</text>
+            </g>
+            <path d="M148 48 L188 48" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ar-violet)"/>
+
+            <!-- L2: target → Map -->
+            <g transform="translate(192,0)" id="tm-l2">
+              <rect width="160" height="56" rx="6" fill="#0e1525" stroke="#42b883" stroke-width="1"/>
+              <text x="80" y="22" font-family="JetBrains Mono" font-size="11" fill="#42b883" text-anchor="middle" font-weight="700">Map</text>
+              <text x="80" y="40" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc" text-anchor="middle">key: state · depsMap</text>
+            </g>
+            <path d="M360 48 L400 48" stroke="#42b883" stroke-width="1.5" marker-end="url(#ar-vue)"/>
+
+            <!-- L3: key → Set -->
+            <g transform="translate(404,-20)" id="tm-l3">
+              <rect width="160" height="96" rx="6" fill="#0e1525" stroke="#fbbf24" stroke-width="1"/>
+              <text x="80" y="22" font-family="JetBrains Mono" font-size="11" fill="#fbbf24" text-anchor="middle" font-weight="700">Map (deps)</text>
+              <g font-family="JetBrains Mono" font-size="10">
+                <text x="14" y="42" fill="#fbbf24">"count"</text>
+                <text x="58" y="42" fill="#a8b3cc">→ Set { fx1 }</text>
+                <text x="14" y="58" fill="#a3e635">"name"</text>
+                <text x="58" y="58" fill="#a8b3cc">→ Set { fx2 }</text>
+                <text x="14" y="74" fill="#22d3ee">"items"</text>
+                <text x="58" y="74" fill="#a8b3cc">→ Set { fx3 }</text>
+              </g>
+            </g>
+            <path d="M572 28 L612 28" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ar-amber)"/>
+
+            <!-- L4: 一个 Set of effects -->
+            <g transform="translate(616,-20)" id="tm-l4">
+              <rect width="76" height="96" rx="6" fill="#0e1525" stroke="#fb7185" stroke-width="1"/>
+              <text x="38" y="22" font-family="JetBrains Mono" font-size="10" fill="#fb7185" text-anchor="middle" font-weight="700">Set</text>
+              <g font-family="JetBrains Mono" font-size="9">
+                <text x="38" y="40" fill="#fbbf24" text-anchor="middle">fx_render</text>
+                <text x="38" y="54" fill="#fbbf24" text-anchor="middle">fx_log</text>
+                <text x="38" y="68" fill="#fbbf24" text-anchor="middle">fx_chart</text>
+              </g>
+            </g>
+          </g>
+
+          <!-- track 函数代码 -->
+          <g transform="translate(20,120)">
+            <line x1="0" y1="0" x2="680" y2="0" stroke="#21304d" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="0" y="22" font-family="JetBrains Mono" font-size="10" fill="#42b883" letter-spacing="0.1em">// track 函数实现 (packages/reactivity/src/effect.ts)</text>
+            <g font-family="JetBrains Mono" font-size="11">
+              <text x="0"  y="44" fill="#a78bfa">function</text>
+              <text x="64" y="44" fill="#fbbf24">track</text>
+              <text x="98" y="44" fill="#e8edf7">(target, key) {</text>
+              <text x="0"  y="60" fill="#e8edf7">  </text><text x="14" y="60" fill="#a78bfa">if</text><text x="32" y="60" fill="#e8edf7"> (!activeEffect) </text><text x="156" y="60" fill="#a78bfa">return</text>
+              <text x="0"  y="76" fill="#e8edf7">  </text><text x="14" y="76" fill="#a78bfa">let</text><text x="34" y="76" fill="#e8edf7"> depsMap = targetMap.get(target)</text>
+              <text x="0"  y="92" fill="#e8edf7">  </text><text x="14" y="92" fill="#a78bfa">if</text><text x="32" y="92" fill="#e8edf7"> (!depsMap) targetMap.set(target, (depsMap = </text><text x="394" y="92" fill="#a78bfa">new</text><text x="420" y="92" fill="#e8edf7"> Map()))</text>
+              <text x="0"  y="108" fill="#e8edf7">  </text><text x="14" y="108" fill="#a78bfa">let</text><text x="34" y="108" fill="#e8edf7"> dep = depsMap.get(key) || depsMap.set(key, </text><text x="370" y="108" fill="#a78bfa">new</text><text x="396" y="108" fill="#e8edf7"> Set()).get(key)</text>
+              <text x="0"  y="124" fill="#e8edf7">  dep.add(</text><text x="68" y="124" fill="#fb7185" font-weight="700">activeEffect</text><text x="156" y="124" fill="#e8edf7">)         </text><text x="218" y="124" fill="#6a7693">// 记住"我在依赖这个 key"</text>
+              <text x="0"  y="140" fill="#e8edf7">}</text>
+            </g>
+          </g>
+        </g>
+
+        <text x="400" y="478" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          每次 effect 读响应式对象，Proxy 都会调 track 把"effect ↔ key"关系记进 targetMap
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 5 · trigger · 触发更新
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-5" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 用户操作（顶部） -->
+        <g id="userOp" transform="translate(280,30)">
+          <rect width="240" height="44" rx="8" fill="rgba(251,113,133,0.10)" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="14" y="20" font-family="JetBrains Mono" font-size="10" fill="#fb7185" letter-spacing="0.1em">USER ACTION</text>
+          <text x="120" y="36" font-family="JetBrains Mono" font-size="14" fill="#e8edf7" text-anchor="middle" font-weight="700">state.count++</text>
+        </g>
+
+        <!-- 箭头到 set handler -->
+        <path id="t-arrow-1" d="M400 78 L400 110" stroke="#fb7185" stroke-width="2" fill="none" marker-end="url(#ar-rose)" opacity="0"/>
+
+        <!-- set handler 高亮 -->
+        <g id="setHandler" transform="translate(220,120)" opacity="0">
+          <rect width="360" height="64" rx="8" fill="#06090f" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fb7185" letter-spacing="0.1em">PROXY · SET TRAP</text>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="14" y="42" fill="#e8edf7"><tspan fill="#a78bfa">set</tspan>(target, key, value) {  Reflect.set(...)  </text>
+            <text x="14" y="58" fill="#e8edf7">  </text><text x="30" y="58" fill="#fb7185" font-weight="700">trigger</text><text x="70" y="58" fill="#e8edf7">(target, "count")</text>
+          </g>
+        </g>
+
+        <!-- trigger 查表 -->
+        <path id="t-arrow-2" d="M400 188 L400 220" stroke="#fb7185" stroke-width="2" fill="none" marker-end="url(#ar-rose)" opacity="0"/>
+        <g id="lookup" transform="translate(160,228)" opacity="0">
+          <rect width="480" height="58" rx="8" fill="#06090f" stroke="#fbbf24" stroke-width="1.2"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">LOOKUP IN TARGETMAP</text>
+          <text x="14" y="42" font-family="JetBrains Mono" font-size="11" fill="#e8edf7">
+            targetMap.get(target).get("count")
+            <tspan fill="#a8b3cc"> → Set</tspan> [ <tspan fill="#fbbf24">fx_render</tspan>, <tspan fill="#fbbf24">fx_log</tspan>, <tspan fill="#fbbf24">fx_chart</tspan> ]
+          </text>
+        </g>
+
+        <!-- 触发所有 effect（底部三个并列闪烁） -->
+        <g transform="translate(60,310)" id="effectsRow">
+          <g id="fx-1">
+            <rect width="200" height="120" rx="10" fill="#0e1525" stroke="#21304d" stroke-width="1.2"/>
+            <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">fx_render</text>
+            <text x="14" y="46" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">() =&gt; renderer.update(</text>
+            <text x="14" y="60" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">  vnode, container</text>
+            <text x="14" y="74" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">)</text>
+            <text x="14" y="100" font-family="JetBrains Mono" font-size="10" fill="#34d399" id="fx1-status" opacity="0">→ 重新渲染</text>
+          </g>
+          <g id="fx-2" transform="translate(220,0)">
+            <rect width="200" height="120" rx="10" fill="#0e1525" stroke="#21304d" stroke-width="1.2"/>
+            <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">fx_log</text>
+            <text x="14" y="46" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">() =&gt; console.log(</text>
+            <text x="14" y="60" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">  "count:", state.count</text>
+            <text x="14" y="74" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">)</text>
+            <text x="14" y="100" font-family="JetBrains Mono" font-size="10" fill="#34d399" id="fx2-status" opacity="0">→ count: 1</text>
+          </g>
+          <g id="fx-3" transform="translate(440,0)">
+            <rect width="240" height="120" rx="10" fill="#0e1525" stroke="#21304d" stroke-width="1.2"/>
+            <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">fx_chart</text>
+            <text x="14" y="46" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">computed(() =&gt;</text>
+            <text x="14" y="60" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">  state.count * 2</text>
+            <text x="14" y="74" font-family="JetBrains Mono" font-size="10.5" fill="#a8b3cc">)</text>
+            <text x="14" y="100" font-family="JetBrains Mono" font-size="10" fill="#34d399" id="fx3-status" opacity="0">→ 缓存失效，下次重算</text>
+          </g>
+        </g>
+
+        <text x="400" y="460" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          一行 state.count++ 触发了多米诺：所有依赖它的 effect 都被通知到
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 6 · render → VNode 树
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-6" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 左：render 函数代码 -->
+        <g transform="translate(40,40)">
+          <rect width="280" height="240" rx="10" fill="#06090f" stroke="#21304d" stroke-width="1"/>
+          <text x="14" y="22" font-family="JetBrains Mono" font-size="10" fill="#42b883" letter-spacing="0.1em">RENDER FUNCTION</text>
+          <g font-family="JetBrains Mono" font-size="11">
+            <text x="14" y="46" fill="#a78bfa">function</text>
+            <text x="78" y="46" fill="#fbbf24">render</text>
+            <text x="118" y="46" fill="#e8edf7">() {</text>
+            <text x="14" y="62" fill="#e8edf7">  </text><text x="30" y="62" fill="#a78bfa">return</text><text x="76" y="62" fill="#e8edf7"> h(</text><text x="96" y="62" fill="#a3e635">"div"</text><text x="126" y="62" fill="#e8edf7">, { </text><text x="146" y="62" fill="#22d3ee">class</text><text x="176" y="62" fill="#e8edf7">: </text><text x="190" y="62" fill="#a3e635">"app"</text><text x="220" y="62" fill="#e8edf7"> }, [</text>
+            <text x="14" y="78" fill="#e8edf7">    h(</text><text x="40" y="78" fill="#a3e635">"h1"</text><text x="64" y="78" fill="#e8edf7">, null, </text><text x="120" y="78" fill="#a3e635">"Count: "</text><text x="180" y="78" fill="#e8edf7"> + count),</text>
+            <text x="14" y="94" fill="#e8edf7">    h(</text><text x="40" y="94" fill="#a3e635">"button"</text><text x="88" y="94" fill="#e8edf7">, {</text>
+            <text x="14" y="110" fill="#e8edf7">      </text><text x="58" y="110" fill="#22d3ee">onClick</text><text x="106" y="110" fill="#e8edf7">: () =&gt; count++</text>
+            <text x="14" y="126" fill="#e8edf7">    }, </text><text x="50" y="126" fill="#a3e635">"+1"</text><text x="74" y="126" fill="#e8edf7">),</text>
+            <text x="14" y="142" fill="#e8edf7">    count &gt; 0 &amp;&amp; h(</text>
+            <text x="14" y="158" fill="#e8edf7">      </text><text x="42" y="158" fill="#a3e635">"span"</text><text x="80" y="158" fill="#e8edf7">, null, </text><text x="136" y="158" fill="#a3e635">"You clicked!"</text>
+            <text x="14" y="174" fill="#e8edf7">    )</text>
+            <text x="14" y="190" fill="#e8edf7">  ])</text>
+            <text x="14" y="206" fill="#e8edf7">}</text>
+          </g>
+        </g>
+
+        <!-- 中：箭头 -->
+        <path d="M328 160 L368 160" stroke="#42b883" stroke-width="1.5" marker-end="url(#ar-vue)"/>
+        <text x="348" y="148" font-family="JetBrains Mono" font-size="10" fill="#42b883" text-anchor="middle">运行</text>
+
+        <!-- 右：VNode 树 -->
+        <g transform="translate(390,40)">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="10" fill="#a78bfa" letter-spacing="0.1em">VNODE TREE</text>
+
+          <!-- root div -->
+          <g id="vn-root" opacity="0">
+            <rect x="100" y="20" width="160" height="60" rx="6" fill="#0e1525" stroke="#a78bfa" stroke-width="1.2"/>
+            <text x="180" y="36" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">{ type: <tspan fill="#a3e635">"div"</tspan>,</text>
+            <text x="180" y="52" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">  props: { class }, </text>
+            <text x="180" y="68" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">  children: [3] }</text>
+          </g>
+
+          <!-- lines to children -->
+          <g id="vn-lines" opacity="0">
+            <line x1="180" y1="80" x2="80" y2="120" stroke="#a78bfa" stroke-width="1"/>
+            <line x1="180" y1="80" x2="180" y2="120" stroke="#a78bfa" stroke-width="1"/>
+            <line x1="180" y1="80" x2="280" y2="120" stroke="#a78bfa" stroke-width="1"/>
+          </g>
+
+          <!-- child 1: h1 -->
+          <g id="vn-h1" opacity="0">
+            <rect x="14" y="120" width="130" height="58" rx="6" fill="#0e1525" stroke="#22d3ee" stroke-width="1.2"/>
+            <text x="79" y="136" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">type: <tspan fill="#a3e635">"h1"</tspan></text>
+            <text x="79" y="152" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">children:</text>
+            <text x="79" y="168" font-family="JetBrains Mono" font-size="11" fill="#a3e635" text-anchor="middle">"Count: 0"</text>
+          </g>
+          <!-- child 2: button -->
+          <g id="vn-btn" opacity="0">
+            <rect x="114" y="120" width="130" height="58" rx="6" fill="#0e1525" stroke="#22d3ee" stroke-width="1.2"/>
+            <text x="179" y="136" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">type: <tspan fill="#a3e635">"button"</tspan></text>
+            <text x="179" y="152" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">props: { onClick }</text>
+            <text x="179" y="168" font-family="JetBrains Mono" font-size="11" fill="#a3e635" text-anchor="middle">"+1"</text>
+          </g>
+          <!-- child 3: span (conditional) -->
+          <g id="vn-span" opacity="0">
+            <rect x="214" y="120" width="146" height="58" rx="6" fill="#0e1525" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="3 3"/>
+            <text x="287" y="136" font-family="JetBrains Mono" font-size="11" fill="#e8edf7" text-anchor="middle">type: <tspan fill="#a3e635">"span"</tspan></text>
+            <text x="287" y="152" font-family="JetBrains Mono" font-size="11" fill="#fb7185" text-anchor="middle">(conditional)</text>
+            <text x="287" y="168" font-family="JetBrains Mono" font-size="11" fill="#a3e635" text-anchor="middle">"You clicked!"</text>
+          </g>
+
+          <!-- VNode 完整 shape -->
+          <g id="vn-shape" transform="translate(0,200)" opacity="0">
+            <rect width="380" height="76" rx="8" fill="#06090f" stroke="#21304d"/>
+            <text x="14" y="20" font-family="JetBrains Mono" font-size="10" fill="#6a7693" letter-spacing="0.1em">// VNode 的完整结构</text>
+            <text x="14" y="40" font-family="JetBrains Mono" font-size="10.5" fill="#e8edf7">{
+              <tspan fill="#22d3ee">type</tspan>, <tspan fill="#22d3ee">props</tspan>, <tspan fill="#22d3ee">children</tspan>,
+              <tspan fill="#22d3ee">key</tspan>, <tspan fill="#fb7185">patchFlag</tspan>, <tspan fill="#fb7185">shapeFlag</tspan>,</text>
+            <text x="14" y="60" font-family="JetBrains Mono" font-size="10.5" fill="#e8edf7">  el?, component?, dynamicChildren? }</text>
+          </g>
+        </g>
+
+        <text x="400" y="478" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          VNode 是真实 DOM 节点的"轻量级镜像" — 用普通 JS 对象描述 UI，便于 diff
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 7 · Diff 算法
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-7" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 标题 -->
+        <text x="60" y="36" font-family="JetBrains Mono" font-size="11" fill="#6a7693" letter-spacing="0.1em">OLD CHILDREN (上一次的 VNode)</text>
+        <text x="60" y="186" font-family="JetBrains Mono" font-size="11" fill="#6a7693" letter-spacing="0.1em">NEW CHILDREN (本次 render 产物)</text>
+
+        <!-- 旧节点行 -->
+        <g transform="translate(60,46)" id="oldRow">
+          <g id="o-A" transform="translate(0,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">A</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="a"</text></g>
+          <g id="o-B" transform="translate(120,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">B</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="b"</text></g>
+          <g id="o-C" transform="translate(240,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">C</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="c"</text></g>
+          <g id="o-D" transform="translate(360,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">D</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="d"</text></g>
+          <g id="o-E" transform="translate(480,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">E</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="e"</text></g>
+        </g>
+
+        <!-- 双端指针 -->
+        <g id="ptr-oldStart" opacity="0">
+          <path d="M110 116 L110 130 L100 130 L110 142 L120 130 L110 130" fill="#22d3ee" stroke="#22d3ee"/>
+          <text x="110" y="156" font-family="JetBrains Mono" font-size="10" fill="#22d3ee" text-anchor="middle" font-weight="600">i</text>
+        </g>
+        <g id="ptr-oldEnd" opacity="0">
+          <path d="M590 116 L590 130 L580 130 L590 142 L600 130 L590 130" fill="#a78bfa" stroke="#a78bfa"/>
+          <text x="590" y="156" font-family="JetBrains Mono" font-size="10" fill="#a78bfa" text-anchor="middle" font-weight="600">e1</text>
+        </g>
+
+        <!-- 新节点行 -->
+        <g transform="translate(60,196)" id="newRow">
+          <g id="n-A" transform="translate(0,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">A</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="a"</text></g>
+          <g id="n-C" transform="translate(120,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">C</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="c"</text></g>
+          <g id="n-B" transform="translate(240,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">B</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="b"</text></g>
+          <g id="n-D" transform="translate(360,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">D</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="d"</text></g>
+          <g id="n-F" transform="translate(480,0)"><rect width="100" height="60" rx="8" class="node-box"/><text x="50" y="26" class="node-text" text-anchor="middle">F</text><text x="50" y="46" class="node-sub" text-anchor="middle">key="f"</text></g>
+        </g>
+
+        <!-- diff 连线（动画化出现） -->
+        <g id="diffLines">
+          <path id="d-A" d="M110 106 L110 196" stroke="#34d399" stroke-width="2" stroke-dasharray="0" fill="none" opacity="0"/>
+          <path id="d-B" d="M170 106 Q220 150 290 196" stroke="#a78bfa" stroke-width="2" fill="none" opacity="0"/>
+          <path id="d-C" d="M290 106 Q220 150 170 196" stroke="#a78bfa" stroke-width="2" fill="none" opacity="0"/>
+          <path id="d-D" d="M410 106 L410 196" stroke="#34d399" stroke-width="2" fill="none" opacity="0"/>
+          <path id="d-E" d="M530 106 L530 196" stroke="#fb7185" stroke-width="2" stroke-dasharray="4 4" fill="none" opacity="0"/>
+          <path id="d-F" d="M530 196 L530 196" stroke="#a3e635" stroke-width="2" fill="none" opacity="0"/>
+        </g>
+
+        <!-- 图例 -->
+        <g transform="translate(60,290)" id="diffLegend" opacity="0">
+          <rect width="680" height="86" rx="8" fill="#06090f" stroke="#21304d" stroke-width="1"/>
+          <g font-family="JetBrains Mono" font-size="11">
+            <line x1="14" y1="22" x2="40" y2="22" stroke="#34d399" stroke-width="2"/>
+            <text x="48" y="26" fill="#e8edf7">复用 (key 相同位置相同 · patch props)</text>
+            <line x1="14" y1="44" x2="40" y2="44" stroke="#a78bfa" stroke-width="2"/>
+            <text x="48" y="48" fill="#e8edf7">移动 (key 相同位置变了 · insertBefore)</text>
+            <line x1="14" y1="66" x2="40" y2="66" stroke="#fb7185" stroke-width="2" stroke-dasharray="4 4"/>
+            <text x="48" y="70" fill="#e8edf7">删除 (旧有新无 · removeChild)</text>
+
+            <line x1="380" y1="22" x2="406" y2="22" stroke="#a3e635" stroke-width="2"/>
+            <text x="414" y="26" fill="#e8edf7">新增 (新有旧无 · createElement)</text>
+            <text x="380" y="50" fill="#6a7693">耗时复杂度：</text>
+            <text x="470" y="50" fill="#fbbf24" font-weight="700">O(n)</text>
+            <text x="380" y="68" fill="#6a7693">关键优化：</text>
+            <text x="450" y="68" fill="#fbbf24">key + 最长递增子序列</text>
+          </g>
+        </g>
+
+        <text x="400" y="478" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          Diff 不重建整棵树 — 用 key 找出能复用的节点，只对差异部分操作 DOM
+        </text>
+      </svg>
+
+      <!-- ════════════════════════════════════════════
+           SCENE 8 · Patch · 翻译为真实 DOM
+           ════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-8" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 左：patch DOM 操作流 -->
+        <g transform="translate(40,40)">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="10" fill="#fbbf24" letter-spacing="0.1em">PATCH · DOM OPERATIONS</text>
+          <rect width="360" height="380" rx="10" fill="#06090f" stroke="#21304d" stroke-width="1" y="8"/>
+
+          <g font-family="JetBrains Mono" font-size="11" id="patchOps">
+            <text class="op" opacity="0" x="14" y="34" fill="#a8b3cc">
+              <tspan fill="#6a7693">[1] </tspan>const el = document.<tspan fill="#fbbf24">createElement</tspan>(<tspan fill="#a3e635">"div"</tspan>)
+            </text>
+            <text class="op" opacity="0" x="14" y="62" fill="#a8b3cc">
+              <tspan fill="#6a7693">[2] </tspan>el.<tspan fill="#fbbf24">setAttribute</tspan>(<tspan fill="#a3e635">"class"</tspan>, <tspan fill="#a3e635">"app"</tspan>)
+            </text>
+            <text class="op" opacity="0" x="14" y="90" fill="#a8b3cc">
+              <tspan fill="#6a7693">[3] </tspan>const h1 = document.<tspan fill="#fbbf24">createElement</tspan>(<tspan fill="#a3e635">"h1"</tspan>)
+            </text>
+            <text class="op" opacity="0" x="14" y="118" fill="#a8b3cc">
+              <tspan fill="#6a7693">[4] </tspan>h1.<tspan fill="#fbbf24">textContent</tspan> = <tspan fill="#a3e635">"Count: 0"</tspan>
+            </text>
+            <text class="op" opacity="0" x="14" y="146" fill="#a8b3cc">
+              <tspan fill="#6a7693">[5] </tspan>el.<tspan fill="#fbbf24">appendChild</tspan>(h1)
+            </text>
+            <text class="op" opacity="0" x="14" y="174" fill="#a8b3cc">
+              <tspan fill="#6a7693">[6] </tspan>const btn = document.<tspan fill="#fbbf24">createElement</tspan>(<tspan fill="#a3e635">"button"</tspan>)
+            </text>
+            <text class="op" opacity="0" x="14" y="202" fill="#a8b3cc">
+              <tspan fill="#6a7693">[7] </tspan>btn.<tspan fill="#fbbf24">addEventListener</tspan>(<tspan fill="#a3e635">"click"</tspan>, handler)
+            </text>
+            <text class="op" opacity="0" x="14" y="230" fill="#a8b3cc">
+              <tspan fill="#6a7693">[8] </tspan>btn.<tspan fill="#fbbf24">textContent</tspan> = <tspan fill="#a3e635">"+1"</tspan>
+            </text>
+            <text class="op" opacity="0" x="14" y="258" fill="#a8b3cc">
+              <tspan fill="#6a7693">[9] </tspan>el.<tspan fill="#fbbf24">appendChild</tspan>(btn)
+            </text>
+            <text class="op" opacity="0" x="14" y="286" fill="#a8b3cc">
+              <tspan fill="#6a7693">[10]</tspan> container.<tspan fill="#fbbf24">appendChild</tspan>(el)  <tspan fill="#34d399">✓ mounted</tspan>
+            </text>
+
+            <text class="op" opacity="0" x="14" y="328" fill="#fb7185">
+              <tspan fill="#6a7693">─── 后续更新 ───</tspan>
+            </text>
+            <text class="op" opacity="0" x="14" y="350" fill="#a8b3cc">
+              <tspan fill="#6a7693">[11]</tspan> h1.<tspan fill="#fbbf24">textContent</tspan> = <tspan fill="#a3e635">"Count: 1"</tspan>  <tspan fill="#34d399">patch flag = 1 (text)</tspan>
+            </text>
+            <text class="op" opacity="0" x="14" y="368" fill="#a8b3cc">
+              <tspan fill="#6a7693">     </tspan>↑ <tspan fill="#42b883">只改这一行</tspan>，其它节点完全不动
+            </text>
+          </g>
+        </g>
+
+        <!-- 右：浏览器渲染结果 -->
+        <g transform="translate(420,40)">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="10" fill="#42b883" letter-spacing="0.1em">BROWSER · RENDERED OUTPUT</text>
+
+          <!-- 浏览器框架 -->
+          <g transform="translate(0,16)">
+            <rect width="340" height="360" rx="10" fill="#0a1224" stroke="#21304d" stroke-width="1"/>
+            <rect width="340" height="30" rx="10" fill="#0e1525"/>
+            <rect y="20" width="340" height="10" fill="#0e1525"/>
+            <circle cx="14" cy="15" r="4" fill="#fb7185"/>
+            <circle cx="28" cy="15" r="4" fill="#fbbf24"/>
+            <circle cx="42" cy="15" r="4" fill="#34d399"/>
+            <rect x="64" y="6" width="260" height="18" rx="9" fill="#06090f" stroke="#21304d"/>
+            <text x="194" y="19" font-family="JetBrains Mono" font-size="10" fill="#6a7693" text-anchor="middle">localhost:5173</text>
+
+            <!-- 渐进出现的页面元素 -->
+            <g id="page-app" opacity="0">
+              <rect x="20" y="58" width="300" height="280" rx="8" fill="rgba(66,184,131,0.06)" stroke="rgba(66,184,131,0.25)" stroke-dasharray="3 3"/>
+              <text x="32" y="76" font-family="JetBrains Mono" font-size="8" fill="#42b883" letter-spacing="0.1em">.app</text>
+            </g>
+
+            <g id="page-h1" opacity="0">
+              <text x="40" y="140" font-family="Inter Tight" font-size="32" fill="#e8edf7" font-weight="800">
+                Count: <tspan fill="#42b883" id="page-count">0</tspan>
+              </text>
+            </g>
+
+            <g id="page-btn" opacity="0" transform="translate(40,180)">
+              <rect width="120" height="46" rx="8" fill="#42b883"/>
+              <text x="60" y="30" font-family="Inter" font-size="16" fill="#0a1224" text-anchor="middle" font-weight="700">+1</text>
+            </g>
+
+            <!-- 闪烁标记：哪里被更新 -->
+            <rect id="page-blink" x="148" y="108" width="40" height="40" rx="4" fill="none" stroke="#fb7185" stroke-width="2" opacity="0"/>
+          </g>
+        </g>
+
+        <text x="400" y="478" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          Patch 函数把 VNode 差异翻译成最少的 DOM API 调用 — 首次挂载是创建，后续更新只改"会变的部分"
+        </text>
+      </svg>
+
+    </div>
+
+    <!-- ──────────────── Narration panel ──────────────── -->
+    <aside class="narrate">
+
+      <div class="pane" data-pane="1">
+        <div class="scene-num">SCENE 01 · 起点</div>
+        <h2>一个 .vue 文件</h2>
+        <p class="body">
+          Vue 的旅程从一个 <code>.vue</code> 文件开始 — <em>SFC（Single File Component）</em>把模板、逻辑、样式装进一个文件。
+          但浏览器只认 HTML/CSS/JS，这三块怎么变成屏幕上能动的 UI？接下来 7 节，<em>从编译到渲染</em>，逐层揭开。
+        </p>
+        <div class="codeblk" data-lang="Counter.vue">
+<span class="h">&lt;template&gt;</span>
+  &lt;div class=<span class="s">"counter"</span>&gt;
+    &lt;h1&gt;Count: {{ <span class="n">count</span> }}&lt;/h1&gt;
+    &lt;button @click=<span class="s">"count++"</span>&gt;+1&lt;/button&gt;
+  &lt;/div&gt;
+<span class="h">&lt;/template&gt;</span>
+
+<span class="k">&lt;script setup&gt;</span>
+  <span class="k">import</span> { ref } <span class="k">from</span> <span class="s">'vue'</span>
+  <span class="k">const</span> count = <span class="h">ref</span>(<span class="n">0</span>)
+<span class="k">&lt;/script&gt;</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="2">
+        <div class="scene-num">SCENE 02 · 编译期</div>
+        <h2>Template → Render Function</h2>
+        <p class="body">
+          模板不是运行时解析的，而是<em>编译期</em>就被转成 <code>render()</code> 函数。流程：
+          源码 → AST → <em>Transform</em>（这一步做静态提升、加 patchFlag、生成 blockTree）→ 代码生成。
+          编译器在这一刻就已经"看懂"了哪些节点是静态的、哪些会变 —— 运行时根本不需要再判断。
+        </p>
+        <div class="codeblk" data-lang="compiled">
+<span class="c">// 静态节点被提升出 render 函数，全局只创建一次</span>
+<span class="k">const</span> _hoisted_1 = _createElementVNode(<span class="s">"button"</span>, null, <span class="s">"+1"</span>)
+
+<span class="k">export function</span> <span class="n">render</span>(_ctx) {
+  <span class="k">return</span> (_openBlock(), _createElementBlock(<span class="s">"div"</span>, { class: <span class="s">"counter"</span> }, [
+    _createElementVNode(<span class="s">"h1"</span>, null,
+      <span class="s">"Count: "</span> + _toDisplayString(_ctx.<span class="n">count</span>),
+      <span class="h">1</span> <span class="c">/* TEXT */</span>     <span class="c">// ← patchFlag: 只有文本会变</span>
+    ),
+    _hoisted_1   <span class="c">// ← 复用静态节点</span>
+  ]))
+}
+        </div>
+      </div>
+
+      <div class="pane" data-pane="3">
+        <div class="scene-num">SCENE 03 · 响应式核心</div>
+        <h2>reactive() 给对象套上 Proxy</h2>
+        <p class="body">
+          <code>reactive(obj)</code> 不是返回新对象的复制，而是返回一个 <em>Proxy</em> —— 一个能拦截所有读写的"代理层"。
+          原始对象毫发无损，但用户对 Proxy 的每次 <code>get</code> / <code>set</code> 都会被拦截器接住，
+          这正是 Vue 能"感知"数据变化的根本机制。
+        </p>
+        <div class="codeblk" data-lang="reactivity">
+<span class="c">// packages/reactivity/src/reactive.ts</span>
+<span class="k">export function</span> <span class="g">reactive</span>(target) {
+  <span class="k">return new</span> <span class="h">Proxy</span>(target, {
+    <span class="k">get</span>(t, key) {
+      <span class="h">track</span>(t, key)               <span class="c">// 收集依赖</span>
+      <span class="k">return</span> Reflect.<span class="n">get</span>(t, key)
+    },
+    <span class="k">set</span>(t, key, value) {
+      Reflect.<span class="n">set</span>(t, key, value)
+      <span class="h">trigger</span>(t, key)             <span class="c">// 触发更新</span>
+    }
+  })
+}
+        </div>
+      </div>
+
+      <div class="pane" data-pane="4">
+        <div class="scene-num">SCENE 04 · 收集</div>
+        <h2>track：建立"谁依赖谁"的图</h2>
+        <p class="body">
+          当 <em>effect</em>（渲染函数、computed、watchEffect 都是 effect）运行时，每次访问响应式属性，
+          Proxy 的 get 拦截器就调用 <code>track</code>，把当前 effect 加进一个三层 Map：
+          <code>WeakMap&lt;target → Map&lt;key → Set&lt;effect&gt;&gt;&gt;</code>。这就是 Vue 知道"<em>state.count 改了，谁要重跑</em>"的依据。
+        </p>
+        <div class="codeblk" data-lang="track">
+<span class="k">let</span> activeEffect   <span class="c">// 当前正在运行的 effect（全局唯一）</span>
+<span class="k">const</span> targetMap = <span class="k">new</span> WeakMap()
+
+<span class="k">function</span> <span class="g">track</span>(target, key) {
+  <span class="k">if</span> (!activeEffect) <span class="k">return</span>
+  <span class="k">let</span> depsMap = targetMap.<span class="n">get</span>(target)
+  <span class="k">if</span> (!depsMap) targetMap.set(target, (depsMap = <span class="k">new</span> Map()))
+  <span class="k">let</span> dep = depsMap.get(key) || depsMap.set(key, <span class="k">new</span> Set()).get(key)
+  dep.add(<span class="h">activeEffect</span>)   <span class="c">// "我在依赖这个 key"</span>
+}
+        </div>
+      </div>
+
+      <div class="pane" data-pane="5">
+        <div class="scene-num">SCENE 05 · 触发</div>
+        <h2>trigger：通知所有受影响的 effect</h2>
+        <p class="body">
+          当 <code>state.count++</code> 触发 set 拦截器，<em>trigger</em> 反查刚才建立的图：
+          找到这个 key 对应的 effect 集合，全部重跑。<em>渲染函数也是一个 effect</em> —— 所以一行赋值，UI 就跟着更新。
+          整个机制不需要 dirty checking，也不需要 setState：依赖关系本身就是"自动追踪"的。
+        </p>
+        <div class="codeblk" data-lang="trigger">
+<span class="k">function</span> <span class="g">trigger</span>(target, key) {
+  <span class="k">const</span> depsMap = targetMap.get(target)
+  <span class="k">if</span> (!depsMap) <span class="k">return</span>
+  <span class="k">const</span> dep = depsMap.get(key)
+  <span class="k">if</span> (!dep) <span class="k">return</span>
+
+  dep.<span class="n">forEach</span>(effect =&gt; {
+    <span class="k">if</span> (effect.scheduler) effect.<span class="h">scheduler</span>()   <span class="c">// 异步批量更新</span>
+    <span class="k">else</span> effect.<span class="h">run</span>()                          <span class="c">// 同步重跑</span>
+  })
+}
+
+<span class="c">// 多个 set 在同一 tick 内会被 scheduler 合并，只重跑一次渲染</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="6">
+        <div class="scene-num">SCENE 06 · 虚拟 DOM</div>
+        <h2>render() 产出 VNode 树</h2>
+        <p class="body">
+          render 函数运行的结果不是 DOM，而是 <em>VNode</em> 树 —— 一棵用普通对象描述 UI 的轻量级镜像。
+          为什么不直接操作 DOM？因为<em>对比两个 JS 对象比对比两棵 DOM 树快得多</em>，
+          而且 VNode 还能附带 <code>patchFlag</code>、<code>shapeFlag</code>、<code>key</code> 这些编译期/运行期的元信息，让后续 diff 更高效。
+        </p>
+        <div class="codeblk" data-lang="vnode">
+<span class="c">// VNode 的完整 shape</span>
+{
+  <span class="h">type</span>:      <span class="s">"div"</span> | Component | Symbol,
+  <span class="h">props</span>:     { class, style, onClick, ... } | null,
+  <span class="h">children</span>:  VNode[] | string | null,
+  <span class="h">key</span>:       string | number,           <span class="c">// diff 复用的依据</span>
+  <span class="n">patchFlag</span>: <span class="n">1</span>,                          <span class="c">// 1=TEXT 2=CLASS 4=STYLE 8=PROPS</span>
+  <span class="n">shapeFlag</span>: <span class="n">9</span>,                          <span class="c">// 节点+children 形态的位运算掩码</span>
+
+  el:        HTMLElement | null,         <span class="c">// 挂载后指向真实 DOM</span>
+  component: ComponentInstance | null,
+  dynamicChildren: VNode[]               <span class="c">// blockTree 跳过静态节点</span>
+}
+        </div>
+      </div>
+
+      <div class="pane" data-pane="7">
+        <div class="scene-num">SCENE 07 · Diff</div>
+        <h2>新旧 VNode 比对</h2>
+        <p class="body">
+          当一个组件重渲染，Vue 不会重建整棵 VNode 对应的 DOM。
+          Diff 算法在<em>同层</em>用 <em>key</em> 找到能复用的节点 — 相同 key 就 patch、位置变了就移动、新增的才 createElement、旧的去掉就 removeChild。
+          复杂度 <code>O(n)</code>，再用<em>最长递增子序列</em>把"移动"的次数降到最少。
+        </p>
+        <div class="codeblk" data-lang="diff">
+<span class="c">// packages/runtime-core/src/renderer.ts · patchKeyedChildren</span>
+<span class="k">function</span> <span class="g">patchKeyedChildren</span>(c1, c2, container) {
+  <span class="k">let</span> i = <span class="n">0</span>, e1 = c1.length - <span class="n">1</span>, e2 = c2.length - <span class="n">1</span>
+
+  <span class="c">// 1. 从头开始 sync：A == A → patch，继续</span>
+  <span class="k">while</span> (i &lt;= e1 &amp;&amp; i &lt;= e2 &amp;&amp; isSameVNodeType(c1[i], c2[i])) {
+    <span class="h">patch</span>(c1[i], c2[i], container)
+    i++
+  }
+  <span class="c">// 2. 从尾开始 sync（同理）</span>
+  <span class="c">// 3. 中间乱序：建立 key→index 映射，找最长递增子序列，最少移动</span>
+  <span class="c">// 4. 多余的旧节点 removeChild；多余的新节点 createElement</span>
+}
+        </div>
+      </div>
+
+      <div class="pane" data-pane="8">
+        <div class="scene-num">SCENE 08 · 落地</div>
+        <h2>Patch：VNode → 真实 DOM API</h2>
+        <p class="body">
+          最后一公里：<em>renderer</em> 把 VNode 翻译成浏览器认识的 DOM 操作。
+          首次挂载是一连串 <code>createElement / setAttribute / appendChild</code>；
+          更新时则<em>只动会变的节点</em> —— 拜 patchFlag 所赐，<code>h1.textContent = "Count: 1"</code> 一句就够了，
+          整棵树其余部分纹丝不动。<em>这就是 Vue 性能的来源：编译期标注 + 运行时精准更新</em>。
+        </p>
+        <div class="codeblk" data-lang="renderer">
+<span class="c">// packages/runtime-dom/src/nodeOps.ts (浏览器平台的实现)</span>
+<span class="k">export const</span> nodeOps = {
+  <span class="h">createElement</span>: (tag) =&gt; document.createElement(tag),
+  <span class="h">setText</span>:       (node, text) =&gt; { node.<span class="n">nodeValue</span> = text },
+  <span class="h">insert</span>:        (child, parent, anchor) =&gt; parent.insertBefore(child, anchor),
+  <span class="h">remove</span>:        (child) =&gt; child.parentNode?.removeChild(child),
+  <span class="h">setElementText</span>:(el, text) =&gt; { el.<span class="n">textContent</span> = text },
+  patchProp: (el, key, prev, next) =&gt; { <span class="c">/* 处理 class/style/event/attr */</span> }
+}
+<span class="c">// runtime-core 完全平台无关 — 换 nodeOps 就能渲染到原生 / Canvas / SSR</span>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btnPrev">◀ 上一节 <span class="kbd">←</span></button>
+    <button class="btn primary" id="btnPlay">▶ 播放 <span class="kbd">Space</span></button>
+    <button class="btn" id="btnNext">下一节 ▶ <span class="kbd">→</span></button>
+    <button class="btn" id="btnRestart">↻ 重播本节 <span class="kbd">R</span></button>
+    <button class="btn" id="btnMute">🔊 旁白开 <span class="kbd">M</span></button>
+    <div class="ctrl-spacer"></div>
+    <div class="chapter-title" id="chapterTitle"><b>第 1 节</b> · 一个 .vue 文件</div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+const CHAPTERS = [
+  { id:1, title:"一个 .vue 文件", duration:11000,
+    narration:"一切从一行字开始。打开一个 vue 文件，你会看到模板、脚本、样式三段塞在一起，这就是 SFC，单文件组件。接下来七节，我们看看 Vue 怎么把它变成屏幕上能动的界面。" },
+  { id:2, title:"编译：Template → Render", duration:14000,
+    narration:"模板不是运行时解析的，在编译期，它先被转成 AST，然后做静态提升，加 patchFlag，最后生成 render 函数。运行时根本不需要再判断哪些节点会变，编译器在这一刻就已经告诉你了。" },
+  { id:3, title:"reactive() · Proxy", duration:13000,
+    narration:"reactive 不复制对象，而是用 Proxy 把它包起来。原始对象毫发无损，但任何读写都被拦截器接住。这就是 Vue 能感知数据变化的根本机制。" },
+  { id:4, title:"track · 依赖收集", duration:15000,
+    narration:"当 effect 运行时，每次访问响应式属性，track 函数都会把当前 effect 记进一张三层 Map：WeakMap 套 Map 套 Set。这张图就是 Vue 知道 谁依赖谁 的依据。" },
+  { id:5, title:"trigger · 触发更新", duration:14000,
+    narration:"当数据改变，set 拦截器触发 trigger。trigger 反查刚才那张图，找到所有依赖的 effect，全部重跑。一行赋值，UI 就自动更新。这一切不需要 setState，也不需要脏检查。" },
+  { id:6, title:"VNode 树", duration:13000,
+    narration:"render 函数运行的产物不是 DOM，而是 VNode 树。用普通 JavaScript 对象描述 UI，便于对比。每个 VNode 还带着 patchFlag、shapeFlag、key，让后续 diff 更高效。" },
+  { id:7, title:"Diff 算法", duration:15000,
+    narration:"重渲染时，Vue 不会重建整棵 DOM。Diff 算法在同一层级用 key 找出能复用的节点。相同 key 就 patch，位置变了就移动，新增的才创建，旧的去掉就删除。复杂度是 O(n)。" },
+  { id:8, title:"Patch · 真实 DOM", duration:15000,
+    narration:"最后一公里。renderer 把 VNode 翻译成浏览器的 DOM API。首次挂载是一连串 createElement。更新时只动会变的节点 —— patchFlag 说哪里变了，就只改哪里。这就是 Vue 性能的来源：编译期标注，加运行时精准更新。" },
+];
+
+const state = { index:0, playing:false, visited:new Set([0]), sceneTimer:null, sceneStart:0, rafId:null, ttsEnabled:true, ttsSpeaking:false };
+
+// ────────────── TTS · 优先 MP3，回退 Web Speech ──────────────
+// MP3 由 scripts/generate-audio.mjs 用 edge-tts 预生成到 audio/ 目录
+// 没生成时自动回退到浏览器原生 SpeechSynthesis
+let useMp3 = null;        // null=未探测, true/false=已探测
+let currentAudio = null;
+let cnVoice = null;
+
+function loadVoices(){
+  if (!('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices();
+  cnVoice = voices.find(v => v.lang.startsWith('zh') && /premium|enhanced|neural/i.test(v.name))
+         || voices.find(v => v.lang.startsWith('zh-CN') || v.lang.startsWith('zh-Hans'))
+         || voices.find(v => v.lang.startsWith('zh'))
+         || null;
+}
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = loadVoices;
+  loadVoices();
+}
+
+async function detectMp3(){
+  if (useMp3 !== null) return useMp3;
+  try {
+    const a = new Audio('audio/scene-1.mp3');
+    await new Promise((resolve, reject) => {
+      a.oncanplaythrough = resolve;
+      a.onloadedmetadata = resolve;
+      a.onerror = reject;
+      setTimeout(reject, 1500);
+      a.load();
+    });
+    useMp3 = true;
+    console.log('[TTS] using MP3 narration');
+  } catch {
+    useMp3 = false;
+    console.log('[TTS] MP3 not found → fallback to Web Speech API');
+  }
+  return useMp3;
+}
+
+function webSpeak(text, onEnd){
+  if (!('speechSynthesis' in window)) { onEnd && onEnd(); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN'; u.rate = 1.05; u.pitch = 1.0;
+  if (cnVoice) u.voice = cnVoice;
+  u.onstart = () => { state.ttsSpeaking = true; };
+  u.onend   = () => { state.ttsSpeaking = false; onEnd && onEnd(); };
+  u.onerror = () => { state.ttsSpeaking = false; onEnd && onEnd(); };
+  speechSynthesis.speak(u);
+}
+
+async function speak(text, idx, onEnd){
+  if (!state.ttsEnabled || !text) { onEnd && onEnd(); return; }
+  stopSpeak();
+  const can = await detectMp3();
+  if (can) {
+    const a = new Audio(`audio/scene-${idx+1}.mp3`);
+    currentAudio = a;
+    a.onplay  = () => { state.ttsSpeaking = true; };
+    a.onended = () => {
+      state.ttsSpeaking = false;
+      if (currentAudio === a) currentAudio = null;
+      onEnd && onEnd();
+    };
+    a.onerror = () => {
+      console.warn('[TTS] mp3 error, fallback to Web Speech');
+      if (currentAudio === a) currentAudio = null;
+      webSpeak(text, onEnd);
+    };
+    a.play().catch(err => {
+      console.warn('[TTS] mp3 play() rejected, fallback:', err);
+      if (currentAudio === a) currentAudio = null;
+      webSpeak(text, onEnd);
+    });
+  } else {
+    webSpeak(text, onEnd);
+  }
+}
+
+function stopSpeak(){
+  if (currentAudio) {
+    // 拆掉 ended 监听，避免触发 onEnd（这会被误判为"自然结束"导致切页）
+    currentAudio.onended = null;
+    currentAudio.onerror = null;
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  state.ttsSpeaking = false;
+}
+
+const chipsEl = document.getElementById('chips');
+CHAPTERS.forEach((c, i) => {
+  const el = document.createElement('div');
+  el.className = 'chip';
+  el.title = `${i+1}. ${c.title}`;
+  el.addEventListener('click', () => goTo(i));
+  chipsEl.appendChild(el);
+});
+function refreshChips(){
+  [...chipsEl.children].forEach((el, i) => {
+    el.classList.toggle('active', i === state.index);
+    el.classList.toggle('done', state.visited.has(i) && i !== state.index);
+  });
+}
+
+function goTo(i){
+  if (i < 0 || i >= CHAPTERS.length) return;
+  state.index = i; state.visited.add(i);
+  document.querySelectorAll('svg.scene').forEach(svg => svg.classList.remove('active'));
+  document.getElementById(`scene-${i+1}`).classList.add('active');
+  document.querySelectorAll('.narrate .pane').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.narrate .pane[data-pane="${i+1}"]`).classList.add('active');
+  document.getElementById('cornerIx').textContent = `SCENE ${String(i+1).padStart(2,'0')}`;
+  document.getElementById('progressLabel').textContent = `${i+1}/${CHAPTERS.length}`;
+  document.getElementById('progressFill').style.width = `${(i+1)/CHAPTERS.length * 100}%`;
+  document.getElementById('chapterTitle').innerHTML = `<b>第 ${i+1} 节</b> · ${CHAPTERS[i].title}`;
+  refreshChips();
+  resetSceneTimer(); runScene(i+1);
+  if (state.playing) {
+    startCurrentScene();
+  } else {
+    speak(CHAPTERS[i].narration, i);
+  }
+}
+// ────────────── 自动推进（按口播结束驱动） ──────────────
+const ADVANCE_BUFFER_MS = 1200;   // 口播结束后停留多久再切下一节
+const SAFETY_MAX_MS     = 60000;  // 兜底：若口播 onEnd 没触发，最长 60s 也强制推进
+
+function advance(){
+  resetSceneTimer();
+  if (state.index < CHAPTERS.length - 1) {
+    goTo(state.index + 1);
+  } else {
+    state.playing = false; updatePlayBtn(); stopSpeak();
+  }
+}
+function scheduleAdvance(ms){
+  if (state.sceneTimer) clearTimeout(state.sceneTimer);
+  state.sceneTimer = setTimeout(advance, ms);
+}
+function resetSceneTimer(){
+  if (state.sceneTimer) clearTimeout(state.sceneTimer); state.sceneTimer = null;
+  if (state.rafId) cancelAnimationFrame(state.rafId); state.rafId = null;
+}
+function tickTime(){
+  const elapsed = performance.now() - state.sceneStart;
+  const f = ms => {
+    const t = Math.max(0, Math.floor(ms/1000));
+    return String(Math.floor(t/60)).padStart(2,'0') + ':' + String(t%60).padStart(2,'0');
+  };
+  // 显示：已播时长 / 章节最短动画时长（仅作参考；实际切换由口播结束决定）
+  document.getElementById('stageTime').textContent = `${f(elapsed)} / ${f(CHAPTERS[state.index].duration)}`;
+  if (state.playing) state.rafId = requestAnimationFrame(tickTime);
+}
+
+// 进入当前章节的"播放模式" — 启动口播 + 等口播完→推进
+function startCurrentScene(){
+  state.sceneStart = performance.now();
+  const text = CHAPTERS[state.index].narration;
+  if (state.ttsEnabled && text) {
+    // 安全网：极端情况下若 onEnd 没触发，60s 后兜底
+    scheduleAdvance(SAFETY_MAX_MS);
+    speak(text, state.index, () => {
+      // 口播自然结束 — 缓冲 ADVANCE_BUFFER_MS 后切下一节
+      if (state.playing) scheduleAdvance(ADVANCE_BUFFER_MS);
+    });
+  } else {
+    // 无 TTS / 静音：回退到 duration 推进
+    scheduleAdvance(CHAPTERS[state.index].duration);
+  }
+  tickTime();
+}
+
+function play(){
+  if (state.playing) return;
+  state.playing = true; updatePlayBtn();
+  startCurrentScene();
+}
+function pause(){
+  state.playing = false; updatePlayBtn();
+  resetSceneTimer(); stopSpeak();
+}
+function togglePlay(){ state.playing ? pause() : play(); }
+function updatePlayBtn(){
+  document.getElementById('btnPlay').innerHTML =
+    state.playing ? '⏸ 暂停 <span class="kbd">Space</span>' : '▶ 播放 <span class="kbd">Space</span>';
+}
+
+document.getElementById('btnPrev').onclick = () => goTo(state.index - 1);
+document.getElementById('btnNext').onclick = () => goTo(state.index + 1);
+document.getElementById('btnPlay').onclick = togglePlay;
+function restartCurrent(){
+  resetSceneTimer();
+  runScene(state.index + 1);
+  if (state.playing) startCurrentScene();
+  else speak(CHAPTERS[state.index].narration, state.index);
+}
+document.getElementById('btnRestart').onclick = restartCurrent;
+document.getElementById('btnMute').onclick = () => {
+  state.ttsEnabled = !state.ttsEnabled;
+  document.getElementById('btnMute').innerHTML =
+    state.ttsEnabled ? '🔊 旁白开 <span class="kbd">M</span>' : '🔇 旁白关 <span class="kbd">M</span>';
+  stopSpeak();
+  if (state.playing) {
+    // 切换静音状态后，重新决定推进策略（按口播 / 按 duration）
+    startCurrentScene();
+  } else if (state.ttsEnabled) {
+    speak(CHAPTERS[state.index].narration, state.index);
+  }
+};
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft')  goTo(state.index - 1);
+  if (e.key === 'ArrowRight') goTo(state.index + 1);
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  if (e.key === 'r' || e.key === 'R') restartCurrent();
+  if (e.key === 'm' || e.key === 'M') document.getElementById('btnMute').click();
+});
+
+const sceneTimers = [];
+function schedule(fn, delay){ sceneTimers.push(setTimeout(fn, delay)); }
+function clearScene(){ sceneTimers.splice(0).forEach(clearTimeout); }
+function resetEl(...ids){ ids.forEach(id => { const e = typeof id === 'string' ? document.getElementById(id) : id; if (e) e.setAttribute('opacity','0'); }); }
+function showEl(id, delay=0){
+  schedule(() => {
+    const e = typeof id === 'string' ? document.getElementById(id) : id;
+    if (e){ e.style.transition = 'opacity 0.5s'; e.setAttribute('opacity','1'); }
+  }, delay);
+}
+function setAttrAt(id, attr, value, delay){
+  schedule(() => {
+    const e = document.getElementById(id);
+    if (e) e.setAttribute(attr, value);
+  }, delay);
+}
+
+function runScene(n){
+  clearScene();
+  if (n === 1) scene1();
+  if (n === 2) scene2();
+  if (n === 3) scene3();
+  if (n === 4) scene4();
+  if (n === 5) scene5();
+  if (n === 6) scene6();
+  if (n === 7) scene7();
+  if (n === 8) scene8();
+}
+
+// Scene 1: 三块依次亮起 + 标签出现
+function scene1(){
+  resetEl('block-tmpl','block-scr','block-sty','block-labels');
+  showEl('block-tmpl',  500);
+  showEl('block-scr',  1700);
+  showEl('block-sty',  3000);
+  showEl('block-labels', 4200);
+}
+
+// Scene 2: 编译流水线 — 4 个 stage 依次亮 + 输出代码出现
+function scene2(){
+  ['cmp-a1','cmp-a2','cmp-a3','cmp-output'].forEach(id => resetEl(id));
+  // 高亮 stage （边框变 vue 绿）
+  const stages = ['cmp-1','cmp-2','cmp-3','cmp-4'];
+  stages.forEach((id, i) => {
+    schedule(() => {
+      const r = document.querySelector(`#${id} rect.node-box, #${id} rect`);
+      if (r){
+        r.style.transition = 'all 0.4s';
+        r.setAttribute('stroke', '#42b883');
+        r.setAttribute('stroke-width', '1.8');
+      }
+    }, 400 + i * 900);
+  });
+  showEl('cmp-a1', 1100);
+  showEl('cmp-a2', 2000);
+  showEl('cmp-a3', 2900);
+  showEl('cmp-output', 4200);
+}
+
+// Scene 3: reactive() 包装 + 用户访问 + 拦截器代码
+function scene3(){
+  resetEl('reactiveCall','proxyRing','userAccess','accessArrow','trapBox');
+  showEl('reactiveCall', 500);
+  showEl('proxyRing',    1500);
+  showEl('userAccess',   2800);
+  showEl('accessArrow',  3700);
+  showEl('trapBox',      4500);
+}
+
+// Scene 4: track — 显示读取 → 画箭头 → targetMap 出现
+function scene4(){
+  resetEl('trackArrow','trackLabel','targetMapBox');
+  // 让 effectBox 的脉动开始
+  // (CSS animation 已经在跑)
+  showEl('trackArrow', 1200);
+  showEl('trackLabel', 1400);
+  showEl('targetMapBox', 2800);
+}
+
+// Scene 5: trigger 链条
+function scene5(){
+  resetEl('t-arrow-1','setHandler','t-arrow-2','lookup','fx1-status','fx2-status','fx3-status');
+  // 三个 effect 的边框先恢复成灰
+  ['fx-1','fx-2','fx-3'].forEach(id => {
+    const r = document.querySelector(`#${id} rect`);
+    if (r){ r.setAttribute('stroke','#21304d'); r.setAttribute('stroke-width','1.2'); r.setAttribute('fill','#0e1525'); }
+  });
+  showEl('t-arrow-1',  700);
+  showEl('setHandler', 1300);
+  showEl('t-arrow-2',  2400);
+  showEl('lookup',     3000);
+  // effects 同时点亮
+  schedule(() => {
+    ['fx-1','fx-2','fx-3'].forEach(id => {
+      const r = document.querySelector(`#${id} rect`);
+      if (r){
+        r.style.transition = 'all 0.5s';
+        r.setAttribute('stroke', '#fbbf24');
+        r.setAttribute('stroke-width', '1.8');
+        r.setAttribute('fill', 'rgba(251,191,36,0.06)');
+      }
+    });
+  }, 4200);
+  showEl('fx1-status', 5000);
+  showEl('fx2-status', 5300);
+  showEl('fx3-status', 5600);
+}
+
+// Scene 6: VNode 树逐层出现
+function scene6(){
+  resetEl('vn-root','vn-lines','vn-h1','vn-btn','vn-span','vn-shape');
+  showEl('vn-root',  600);
+  showEl('vn-lines', 1500);
+  showEl('vn-h1',    2100);
+  showEl('vn-btn',   2700);
+  showEl('vn-span',  3300);
+  showEl('vn-shape', 4500);
+}
+
+// Scene 7: Diff 算法 — 指针 → 连线依次出现 → 图例
+function scene7(){
+  resetEl('ptr-oldStart','ptr-oldEnd','d-A','d-B','d-C','d-D','d-E','d-F','diffLegend');
+  // 节点边框先恢复
+  ['o-A','o-B','o-C','o-D','o-E','n-A','n-B','n-C','n-D','n-F'].forEach(id => {
+    const r = document.querySelector(`#${id} rect`);
+    if (r){ r.setAttribute('stroke','#21304d'); }
+  });
+  showEl('ptr-oldStart', 600);
+  showEl('ptr-oldEnd',   900);
+  // 复用 (A)
+  schedule(() => {
+    document.querySelector('#o-A rect').setAttribute('stroke','#34d399');
+    document.querySelector('#n-A rect').setAttribute('stroke','#34d399');
+  }, 1600);
+  showEl('d-A', 1700);
+  // 移动 (B ↔ C)
+  schedule(() => {
+    document.querySelector('#o-B rect').setAttribute('stroke','#a78bfa');
+    document.querySelector('#o-C rect').setAttribute('stroke','#a78bfa');
+    document.querySelector('#n-B rect').setAttribute('stroke','#a78bfa');
+    document.querySelector('#n-C rect').setAttribute('stroke','#a78bfa');
+  }, 2600);
+  showEl('d-B', 2700);
+  showEl('d-C', 2900);
+  // 复用 (D)
+  schedule(() => {
+    document.querySelector('#o-D rect').setAttribute('stroke','#34d399');
+    document.querySelector('#n-D rect').setAttribute('stroke','#34d399');
+  }, 3800);
+  showEl('d-D', 3900);
+  // 删除 (E)
+  schedule(() => {
+    document.querySelector('#o-E rect').setAttribute('stroke','#fb7185');
+    document.querySelector('#o-E rect').setAttribute('stroke-dasharray','4 4');
+  }, 4700);
+  showEl('d-E', 4800);
+  // 新增 (F)
+  schedule(() => {
+    document.querySelector('#n-F rect').setAttribute('stroke','#a3e635');
+  }, 5500);
+  showEl('d-F', 5600);
+  showEl('diffLegend', 6500);
+}
+
+// Scene 8: patch ops 逐行 + 浏览器中元素依次出现 + 更新闪烁
+function scene8(){
+  const ops = document.querySelectorAll('#patchOps .op');
+  ops.forEach((o, i) => {
+    o.setAttribute('opacity', '0');
+    schedule(() => {
+      o.style.transition = 'opacity 0.3s';
+      o.setAttribute('opacity', '1');
+    }, 300 + i * 500);
+  });
+  resetEl('page-app','page-h1','page-btn','page-blink');
+  document.getElementById('page-count').textContent = '0';
+
+  showEl('page-app',  900);    // [1]/[2] createElement div
+  showEl('page-h1', 2200);     // [3]/[4]/[5] h1
+  showEl('page-btn', 4200);    // [6]~[9] button
+  // [10] mounted - 已经组装完成
+
+  // 后续更新：count 0 → 1
+  schedule(() => {
+    document.getElementById('page-count').textContent = '1';
+    const blink = document.getElementById('page-blink');
+    blink.setAttribute('opacity', '1');
+    blink.style.transition = 'opacity 0.4s';
+    setTimeout(() => blink.setAttribute('opacity','0'), 800);
+  }, 7600);
+}
+
+// 初始化：先把 playing 设上，再 goTo(0)
+// 这样 goTo 内部就会走 startCurrentScene() 路径，避免连续 speak 两次
+state.playing = true;
+updatePlayBtn();
+goTo(0);
+</script>
+
+</body>
+</html>

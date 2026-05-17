@@ -1,0 +1,1555 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>浏览器请求的底层之旅 — 从一行 URL 到屏幕上的像素</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:           #060912;
+    --bg-grid:      rgba(120, 140, 200, 0.04);
+    --surface:      #0e1525;
+    --surface-2:    #131c33;
+    --border:       #21304d;
+    --border-soft:  rgba(120, 140, 200, 0.12);
+    --text:         #e8edf7;
+    --text-dim:     #a8b3cc;
+    --muted:        #6a7693;
+
+    --cyan:    #22d3ee;
+    --violet:  #a78bfa;
+    --lime:    #a3e635;
+    --amber:   #fbbf24;
+    --rose:    #fb7185;
+    --emerald: #34d399;
+
+    --font-sans:    'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Inter Tight', 'Inter', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --radius-sm: 6px;
+    --radius:    10px;
+    --radius-lg: 16px;
+  }
+
+  *,*::before,*::after{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; height:100%; }
+  body{
+    font-family: var(--font-sans);
+    color: var(--text);
+    background:
+      radial-gradient(1200px 800px at 70% -10%, rgba(167,139,250,0.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(34,211,238,0.08), transparent 60%),
+      linear-gradient(180deg, #060912 0%, #04060e 100%);
+    background-attachment: fixed;
+    overflow: hidden;
+  }
+  body::before{
+    content:"";
+    position: fixed; inset:0;
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index:0;
+  }
+
+  /* ── Layout shell ─────────────────────────── */
+  .app{
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 18px 28px 18px;
+    gap: 14px;
+  }
+
+  /* Header */
+  .topbar{ display: flex; align-items: center; gap: 18px; }
+  .brand{
+    display:flex; align-items:center; gap: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .brand .dot{
+    width:10px; height:10px; border-radius:50%;
+    background: linear-gradient(135deg, var(--cyan), var(--violet));
+    box-shadow: 0 0 18px rgba(167,139,250,0.7);
+  }
+  .brand .title{ font-size: 15px; }
+  .brand .sub{ color: var(--muted); font-size: 12px; font-weight: 500; margin-left: 8px; }
+
+  .progress{
+    flex: 1;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .progress .bar{
+    flex: 1; height: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: 999px;
+    position: relative; overflow: hidden;
+  }
+  .progress .bar .fill{
+    position: absolute; inset: 0;
+    width: 0%;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+  .progress .label{
+    font-family: var(--font-mono);
+    font-size: 12px; color: var(--text-dim);
+    min-width: 38px; text-align: right;
+  }
+  .chips{ display:flex; gap: 4px; }
+  .chip{
+    width: 26px; height: 18px;
+    border-radius: 5px;
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .chip:hover{ background: var(--surface-2); border-color: var(--border); }
+  .chip.done{ background: rgba(52,211,153,0.18); border-color: rgba(52,211,153,0.5); }
+  .chip.active{
+    background: linear-gradient(135deg, rgba(34,211,238,0.25), rgba(167,139,250,0.25));
+    border-color: var(--cyan);
+    box-shadow: 0 0 12px rgba(34,211,238,0.4);
+  }
+
+  /* Stage */
+  .stage-wrap{
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(360px, 1fr);
+    gap: 16px;
+    min-height: 0;
+  }
+  .stage{
+    position: relative;
+    background:
+      radial-gradient(800px 500px at 30% 20%, rgba(34,211,238,0.05), transparent 60%),
+      var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .stage svg.scene{
+    position: absolute; inset:0;
+    width: 100%; height: 100%;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+  .stage svg.scene.active{ opacity: 1; pointer-events: auto; }
+  .stage-corner{
+    position: absolute; top: 12px; left: 14px;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--muted); letter-spacing: 0.05em;
+  }
+  .stage-corner .ix{ color: var(--text-dim); }
+  .stage-time{
+    position: absolute; bottom: 12px; right: 14px;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* Narration */
+  .narrate{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 22px 20px;
+    display: flex; flex-direction: column;
+    min-height: 0; overflow: hidden;
+  }
+  .narrate .scene-num{
+    font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.15em;
+    color: var(--cyan);
+    text-transform: uppercase;
+  }
+  .narrate h2{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 6px 0 12px;
+  }
+  .narrate .body{
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.65;
+    margin-bottom: 14px;
+  }
+  .narrate .body em{
+    color: var(--text);
+    font-style: normal;
+    background: linear-gradient(180deg, transparent 60%, rgba(167,139,250,0.22) 60%);
+    padding: 0 2px;
+  }
+  .narrate .body code{
+    font-family: var(--font-mono); font-size: 12.5px;
+    color: var(--cyan);
+    background: rgba(34,211,238,0.07);
+    border: 1px solid rgba(34,211,238,0.18);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .codeblk{
+    background: #06090f;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    overflow: auto;
+    max-height: 200px;
+    position: relative;
+    white-space: pre;
+    tab-size: 2;
+    -moz-tab-size: 2;
+  }
+  .codeblk::before{
+    content: attr(data-lang);
+    position: absolute; top: 8px; right: 12px;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .codeblk .k { color: var(--violet); }
+  .codeblk .s { color: var(--lime); }
+  .codeblk .n { color: var(--amber); }
+  .codeblk .c { color: var(--muted); font-style: italic; }
+  .codeblk .h { color: var(--cyan); font-weight: 600; }
+  .codeblk .v { color: var(--text); }
+
+  .narrate .pane{ display: none; }
+  .narrate .pane.active{ display: block; }
+
+  .narrate .pane > * + * { margin-top: 0; }
+
+  /* Controls */
+  .controls{
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+  }
+  .btn{
+    appearance: none;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 13px;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: all 0.15s;
+  }
+  .btn:hover{ background: #1a2240; border-color: #2c3a5e; }
+  .btn:active{ transform: translateY(1px); }
+  .btn.primary{
+    background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(167,139,250,0.18));
+    border-color: rgba(34,211,238,0.4);
+  }
+  .btn .kbd{
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--border-soft);
+    border-radius: 3px; padding: 1px 4px;
+  }
+  .ctrl-spacer{ flex: 1; }
+  .chapter-title{
+    font-size: 12.5px;
+    color: var(--text-dim);
+  }
+  .chapter-title b{
+    color: var(--text); font-weight: 600;
+  }
+
+  /* SVG common styles */
+  svg.scene .node-box{
+    fill: var(--surface-2);
+    stroke: var(--border);
+    stroke-width: 1.2;
+  }
+  svg.scene .node-text{
+    font-family: var(--font-sans);
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  svg.scene .node-sub{
+    font-family: var(--font-mono);
+    fill: var(--muted);
+    font-size: 11px;
+  }
+  svg.scene .wire{
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 1.2;
+    stroke-dasharray: 4 4;
+  }
+  svg.scene .wire.live{
+    stroke: var(--cyan);
+    stroke-dasharray: none;
+    filter: drop-shadow(0 0 6px rgba(34,211,238,0.5));
+  }
+  svg.scene .label{
+    font-family: var(--font-mono);
+    fill: var(--text-dim);
+    font-size: 10.5px;
+  }
+
+  /* responsive */
+  @media (max-width: 920px){
+    .stage-wrap{ grid-template-columns: 1fr; grid-template-rows: minmax(280px, 1fr) auto; }
+    .app{ padding: 12px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gradCV" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="gradLA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a3e635"/><stop offset="1" stop-color="#fbbf24"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <symbol id="ic-laptop" viewBox="0 0 64 48">
+      <rect x="6" y="4" width="52" height="34" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="10" y="8" width="44" height="26" rx="1" fill="currentColor" opacity="0.1"/>
+      <path d="M2 40 L62 40 L58 44 L6 44 Z" fill="currentColor" opacity="0.3" stroke="currentColor" stroke-width="1.2"/>
+    </symbol>
+    <symbol id="ic-server" viewBox="0 0 56 56">
+      <rect x="6" y="6" width="44" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="12" cy="13" r="1.5" fill="currentColor"/>
+      <circle cx="18" cy="13" r="1.5" fill="currentColor" opacity="0.5"/>
+      <rect x="6" y="22" width="44" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="12" cy="29" r="1.5" fill="currentColor"/>
+      <circle cx="18" cy="29" r="1.5" fill="currentColor" opacity="0.5"/>
+      <rect x="6" y="38" width="44" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="12" cy="45" r="1.5" fill="currentColor"/>
+      <circle cx="18" cy="45" r="1.5" fill="currentColor" opacity="0.5"/>
+    </symbol>
+    <symbol id="ic-dns" viewBox="0 0 48 48">
+      <circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <ellipse cx="24" cy="24" rx="18" ry="8" fill="none" stroke="currentColor" stroke-width="1"/>
+      <line x1="6" y1="24" x2="42" y2="24" stroke="currentColor" stroke-width="1"/>
+      <line x1="24" y1="6" x2="24" y2="42" stroke="currentColor" stroke-width="1"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="title">浏览器请求的底层之旅</span>
+      <span class="sub">从一行 URL 到屏幕上的像素 · 8 节</span>
+    </div>
+    <div class="progress">
+      <div class="chips" id="chips"></div>
+      <div class="bar"><div class="fill" id="progressFill"></div></div>
+      <div class="label" id="progressLabel">1/8</div>
+    </div>
+  </header>
+
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <div class="stage-corner"><span class="ix" id="cornerIx">SCENE 01</span></div>
+      <div class="stage-time" id="stageTime">00:00 / 00:00</div>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 1 · 序章：你输入了一个 URL
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-1" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 浏览器外壳 -->
+        <g transform="translate(120,90)">
+          <rect x="0" y="0" width="560" height="320" rx="10" fill="#0c1426" stroke="#2a3552" stroke-width="1.5"/>
+          <!-- 标题栏 -->
+          <rect x="0" y="0" width="560" height="36" rx="10" fill="#131c33"/>
+          <rect x="0" y="26" width="560" height="10" fill="#131c33"/>
+          <circle cx="18" cy="18" r="5" fill="#fb7185"/>
+          <circle cx="36" cy="18" r="5" fill="#fbbf24"/>
+          <circle cx="54" cy="18" r="5" fill="#34d399"/>
+          <!-- 地址栏 -->
+          <rect x="80" y="48" width="400" height="32" rx="16" fill="#06090f" stroke="#2a3552" stroke-width="1"/>
+          <text x="98" y="69" font-family="JetBrains Mono" font-size="13" fill="#6a7693">
+            <tspan id="urlTyping"></tspan><tspan id="urlCaret" fill="#22d3ee">▍</tspan>
+          </text>
+          <!-- 刷新/前进按钮 -->
+          <circle cx="40" cy="64" r="10" fill="none" stroke="#2a3552" stroke-width="1"/>
+          <circle cx="64" cy="64" r="10" fill="none" stroke="#2a3552" stroke-width="1"/>
+          <!-- 回车提示 -->
+          <g id="enterHint" opacity="0">
+            <rect x="490" y="50" width="60" height="28" rx="6" fill="rgba(34,211,238,0.15)" stroke="#22d3ee" stroke-width="1"/>
+            <text x="520" y="68" font-family="Inter" font-size="11" fill="#22d3ee" text-anchor="middle" font-weight="600">↵ Enter</text>
+          </g>
+          <!-- 页面区 -->
+          <rect x="20" y="100" width="520" height="200" rx="6" fill="#06090f" stroke="#1a2138" stroke-width="1"/>
+          <text x="280" y="200" font-family="Inter" font-size="14" fill="#6a7693" text-anchor="middle" id="pageText">
+            等待加载…
+          </text>
+        </g>
+
+        <!-- 底部说明 -->
+        <text x="400" y="450" font-family="JetBrains Mono" font-size="11" fill="#6a7693" text-anchor="middle">
+          <tspan id="phase1Hint">用户按下回车的瞬间，背后将发生一系列复杂的协调</tspan>
+        </text>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 2 · DNS 解析
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-2" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 客户端 -->
+        <g transform="translate(40,210)">
+          <rect class="node-box" x="0" y="0" width="120" height="80" rx="8"/>
+          <g transform="translate(28,16)" color="#22d3ee"><use href="#ic-laptop" width="64" height="48"/></g>
+          <text class="node-sub" x="60" y="72" text-anchor="middle">你的电脑</text>
+        </g>
+
+        <!-- Local resolver -->
+        <g transform="translate(220,210)">
+          <rect class="node-box" x="0" y="0" width="120" height="80" rx="8"/>
+          <g transform="translate(36,14)" color="#a78bfa"><use href="#ic-dns" width="48" height="48"/></g>
+          <text class="node-text" x="60" y="50" text-anchor="middle" font-size="12">Local Resolver</text>
+          <text class="node-sub" x="60" y="72" text-anchor="middle">192.168.1.1</text>
+        </g>
+
+        <!-- Root → TLD → Authoritative 阶梯 -->
+        <g transform="translate(420,40)">
+          <rect class="node-box" x="0" y="0" width="160" height="56" rx="8"/>
+          <text class="node-text" x="80" y="24" text-anchor="middle" font-size="12">Root DNS</text>
+          <text class="node-sub" x="80" y="42" text-anchor="middle">.</text>
+        </g>
+        <g transform="translate(540,170)">
+          <rect class="node-box" x="0" y="0" width="160" height="56" rx="8"/>
+          <text class="node-text" x="80" y="24" text-anchor="middle" font-size="12">TLD DNS</text>
+          <text class="node-sub" x="80" y="42" text-anchor="middle">.com</text>
+        </g>
+        <g transform="translate(540,300)">
+          <rect class="node-box" x="0" y="0" width="160" height="56" rx="8"/>
+          <text class="node-text" x="80" y="24" text-anchor="middle" font-size="12">Authoritative</text>
+          <text class="node-sub" x="80" y="42" text-anchor="middle">ns.example.com</text>
+        </g>
+
+        <!-- 静态连线 -->
+        <path class="wire" d="M340 250 L420 68" id="w-r"/>
+        <path class="wire" d="M340 250 L540 198" id="w-t"/>
+        <path class="wire" d="M340 250 L540 328" id="w-a"/>
+        <path class="wire" d="M160 250 L220 250" id="w-l"/>
+
+        <!-- 飞行 packet 占位 -->
+        <g id="dnsPackets"></g>
+
+        <!-- 最终答案气泡 -->
+        <g id="dnsResult" transform="translate(40,310)" opacity="0">
+          <rect width="280" height="90" rx="10" fill="rgba(52,211,153,0.10)" stroke="#34d399" stroke-width="1.2"/>
+          <text x="14" y="26" font-family="JetBrains Mono" font-size="11" fill="#34d399" font-weight="600">
+            ;; ANSWER SECTION:
+          </text>
+          <text x="14" y="48" font-family="JetBrains Mono" font-size="12" fill="#e8edf7">
+            example.com.  86400  IN  A
+          </text>
+          <text x="14" y="70" font-family="JetBrains Mono" font-size="15" fill="#22d3ee" font-weight="700">
+            93.184.216.34
+          </text>
+        </g>
+
+        <text x="400" y="470" font-family="Inter" font-size="11" fill="#6a7693" text-anchor="middle">
+          DNS 是互联网的电话簿 — 把域名翻译成 IP，浏览器才知道发往哪
+        </text>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 3 · TCP 三次握手
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-3" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- Client column -->
+        <g transform="translate(80,60)">
+          <rect class="node-box" x="0" y="0" width="160" height="60" rx="8"/>
+          <text class="node-text" x="80" y="26" text-anchor="middle">Client</text>
+          <text class="node-sub" x="80" y="46" text-anchor="middle">93.184.x.x:54321</text>
+          <line x1="80" y1="60" x2="80" y2="380" stroke="#2a3552" stroke-width="1.2" stroke-dasharray="2 4"/>
+        </g>
+        <!-- Server column -->
+        <g transform="translate(560,60)">
+          <rect class="node-box" x="0" y="0" width="160" height="60" rx="8"/>
+          <text class="node-text" x="80" y="26" text-anchor="middle">Server</text>
+          <text class="node-sub" x="80" y="46" text-anchor="middle">93.184.216.34:443</text>
+          <line x1="80" y1="60" x2="80" y2="380" stroke="#2a3552" stroke-width="1.2" stroke-dasharray="2 4"/>
+        </g>
+
+        <!-- 时序箭头 -->
+        <g id="tcp-syn" opacity="0">
+          <path d="M160 160 L640 200" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#arrow-c)"/>
+          <rect x="320" y="155" width="160" height="36" rx="6" fill="#06090f" stroke="#22d3ee" stroke-width="1"/>
+          <text x="400" y="172" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" text-anchor="middle" font-weight="700">SYN</text>
+          <text x="400" y="186" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">seq=x</text>
+        </g>
+
+        <g id="tcp-synack" opacity="0">
+          <path d="M640 240 L160 280" stroke="#a78bfa" stroke-width="2" fill="none" marker-end="url(#arrow-v)"/>
+          <rect x="320" y="240" width="160" height="36" rx="6" fill="#06090f" stroke="#a78bfa" stroke-width="1"/>
+          <text x="400" y="257" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" text-anchor="middle" font-weight="700">SYN + ACK</text>
+          <text x="400" y="271" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">seq=y, ack=x+1</text>
+        </g>
+
+        <g id="tcp-ack" opacity="0">
+          <path d="M160 320 L640 360" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#arrow-c)"/>
+          <rect x="320" y="320" width="160" height="36" rx="6" fill="#06090f" stroke="#22d3ee" stroke-width="1"/>
+          <text x="400" y="337" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" text-anchor="middle" font-weight="700">ACK</text>
+          <text x="400" y="351" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">ack=y+1</text>
+        </g>
+
+        <g id="tcp-est" opacity="0">
+          <rect x="280" y="400" width="240" height="44" rx="8" fill="rgba(52,211,153,0.10)" stroke="#34d399" stroke-width="1.2"/>
+          <text x="400" y="426" font-family="Inter" font-size="14" fill="#34d399" text-anchor="middle" font-weight="600">
+            🔗 Connection Established
+          </text>
+        </g>
+
+        <defs>
+          <marker id="arrow-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#22d3ee"/>
+          </marker>
+          <marker id="arrow-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#a78bfa"/>
+          </marker>
+        </defs>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 4 · TLS 握手
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-4" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <g transform="translate(80,40)">
+          <rect class="node-box" width="160" height="48" rx="8"/>
+          <text class="node-text" x="80" y="30" text-anchor="middle">Browser</text>
+          <line x1="80" y1="48" x2="80" y2="420" stroke="#2a3552" stroke-width="1.2" stroke-dasharray="2 4"/>
+        </g>
+        <g transform="translate(560,40)">
+          <rect class="node-box" width="160" height="48" rx="8"/>
+          <text class="node-text" x="80" y="30" text-anchor="middle">Server</text>
+          <line x1="80" y1="48" x2="80" y2="420" stroke="#2a3552" stroke-width="1.2" stroke-dasharray="2 4"/>
+        </g>
+
+        <g id="tls-hello" opacity="0">
+          <path d="M160 120 L640 140" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#arrow-c)"/>
+          <rect x="290" y="108" width="220" height="36" rx="6" fill="#06090f" stroke="#22d3ee" stroke-width="1"/>
+          <text x="400" y="124" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" text-anchor="middle" font-weight="700">ClientHello</text>
+          <text x="400" y="138" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc" text-anchor="middle">cipher_suites, random, SNI</text>
+        </g>
+
+        <g id="tls-shello" opacity="0">
+          <path d="M640 180 L160 200" stroke="#a78bfa" stroke-width="2" fill="none" marker-end="url(#arrow-v)"/>
+          <rect x="290" y="168" width="220" height="36" rx="6" fill="#06090f" stroke="#a78bfa" stroke-width="1"/>
+          <text x="400" y="184" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" text-anchor="middle" font-weight="700">ServerHello + Certificate</text>
+          <text x="400" y="198" font-family="JetBrains Mono" font-size="9" fill="#a8b3cc" text-anchor="middle">公钥 + 证书链</text>
+        </g>
+
+        <g id="tls-verify" opacity="0">
+          <rect x="50" y="230" width="220" height="56" rx="6" fill="rgba(34,211,238,0.06)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="3 3"/>
+          <text x="160" y="252" font-family="Inter" font-size="12" fill="#22d3ee" text-anchor="middle" font-weight="600">浏览器验证证书</text>
+          <text x="160" y="270" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">CA 签名 / 域名匹配 / 有效期</text>
+        </g>
+
+        <g id="tls-key" opacity="0">
+          <path d="M160 320 L640 320" stroke="#fbbf24" stroke-width="2" fill="none" marker-end="url(#arrow-a)"/>
+          <rect x="290" y="304" width="220" height="32" rx="6" fill="#06090f" stroke="#fbbf24" stroke-width="1"/>
+          <text x="400" y="324" font-family="JetBrains Mono" font-size="11" fill="#fbbf24" text-anchor="middle" font-weight="700">Key Exchange</text>
+        </g>
+
+        <g id="tls-done" opacity="0">
+          <rect x="220" y="380" width="360" height="50" rx="8" fill="rgba(52,211,153,0.10)" stroke="#34d399" stroke-width="1.2"/>
+          <text x="400" y="410" font-family="Inter" font-size="14" fill="#34d399" text-anchor="middle" font-weight="600">
+            🔒 加密通道建立 · 后续报文用对称密钥加密
+          </text>
+        </g>
+
+        <defs>
+          <marker id="arrow-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#fbbf24"/>
+          </marker>
+        </defs>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 5 · HTTP 请求
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-5" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <g transform="translate(60,180)">
+          <rect class="node-box" width="120" height="100" rx="8"/>
+          <g transform="translate(28,26)" color="#22d3ee"><use href="#ic-laptop" width="64" height="48"/></g>
+          <text class="node-sub" x="60" y="92" text-anchor="middle">Client</text>
+        </g>
+        <g transform="translate(620,180)">
+          <rect class="node-box" width="120" height="100" rx="8"/>
+          <g transform="translate(32,22)" color="#a78bfa"><use href="#ic-server" width="56" height="56"/></g>
+          <text class="node-sub" x="60" y="92" text-anchor="middle">Server</text>
+        </g>
+
+        <!-- 飞行包 -->
+        <g id="httpPacket" transform="translate(180,160)" opacity="0">
+          <rect width="260" height="140" rx="10" fill="#06090f" stroke="#22d3ee" stroke-width="1.5" filter="url(#softglow)"/>
+          <text x="14" y="24" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" font-weight="700">HTTP/1.1 REQUEST</text>
+          <line x1="14" y1="32" x2="246" y2="32" stroke="#1a2138" stroke-width="1"/>
+          <text x="14" y="52" font-family="JetBrains Mono" font-size="12" fill="#a3e635" font-weight="700">GET <tspan fill="#e8edf7">/ HTTP/1.1</tspan></text>
+          <text x="14" y="72" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Host: <tspan fill="#fbbf24">example.com</tspan></text>
+          <text x="14" y="90" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">User-Agent: <tspan fill="#e8edf7">Mozilla/5.0</tspan></text>
+          <text x="14" y="108" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Accept: <tspan fill="#e8edf7">text/html</tspan></text>
+          <text x="14" y="126" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Accept-Language: <tspan fill="#e8edf7">zh-CN</tspan></text>
+        </g>
+
+        <!-- 飞行路径 hint -->
+        <path d="M180 230 Q400 230 620 230" stroke="#21304d" stroke-width="1" stroke-dasharray="3 4" fill="none"/>
+
+        <text x="400" y="440" font-family="Inter" font-size="11" fill="#6a7693" text-anchor="middle">
+          HTTP 请求 = 一段纯文本：动词 + 路径 + 头部，全部都肉眼可读
+        </text>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 6 · 服务器处理
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-6" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- 服务器外壳 -->
+        <g transform="translate(60,70)">
+          <rect width="680" height="360" rx="14" fill="#0a1224" stroke="#21304d" stroke-width="1.5"/>
+          <text x="20" y="30" font-family="Inter" font-size="12" fill="#6a7693" font-weight="600" letter-spacing="0.1em">SERVER · example.com</text>
+
+          <!-- 流水线 -->
+          <g transform="translate(36,72)">
+            <!-- Stage 1: Reverse Proxy -->
+            <g id="srv-1">
+              <rect width="140" height="80" rx="8" class="node-box"/>
+              <text x="70" y="32" class="node-text" text-anchor="middle">Reverse Proxy</text>
+              <text x="70" y="50" class="node-sub" text-anchor="middle">Nginx</text>
+              <text x="70" y="66" class="node-sub" text-anchor="middle">SSL termination</text>
+            </g>
+            <!-- arrow -->
+            <path d="M148 112 L184 112" stroke="#21304d" stroke-width="1.5" marker-end="url(#arrow-d)"/>
+            <!-- Stage 2: Router -->
+            <g id="srv-2" transform="translate(192,0)">
+              <rect width="140" height="80" rx="8" class="node-box"/>
+              <text x="70" y="32" class="node-text" text-anchor="middle">Router</text>
+              <text x="70" y="50" class="node-sub" text-anchor="middle">match GET /</text>
+              <text x="70" y="66" class="node-sub" text-anchor="middle">→ HomeController</text>
+            </g>
+            <path d="M340 112 L376 112" stroke="#21304d" stroke-width="1.5" marker-end="url(#arrow-d)"/>
+            <!-- Stage 3: Handler -->
+            <g id="srv-3" transform="translate(384,0)">
+              <rect width="140" height="80" rx="8" class="node-box"/>
+              <text x="70" y="32" class="node-text" text-anchor="middle">Handler</text>
+              <text x="70" y="50" class="node-sub" text-anchor="middle">业务逻辑</text>
+              <text x="70" y="66" class="node-sub" text-anchor="middle">render template</text>
+            </g>
+            <path d="M532 112 L568 112" stroke="#21304d" stroke-width="1.5" marker-end="url(#arrow-d)"/>
+            <!-- Stage 4: DB -->
+            <g id="srv-4" transform="translate(576,0)">
+              <rect width="44" height="80" rx="8" class="node-box"/>
+              <ellipse cx="22" cy="20" rx="14" ry="5" fill="none" stroke="#a78bfa" stroke-width="1.2"/>
+              <path d="M8 20 L8 50 Q8 55 22 55 Q36 55 36 50 L36 20" fill="none" stroke="#a78bfa" stroke-width="1.2"/>
+              <ellipse cx="22" cy="35" rx="14" ry="5" fill="none" stroke="#a78bfa" stroke-width="1.2"/>
+              <text x="22" y="74" class="node-sub" text-anchor="middle">DB</text>
+            </g>
+          </g>
+
+          <!-- 时序日志 -->
+          <g transform="translate(36,200)">
+            <rect width="608" height="140" rx="8" fill="#06090f" stroke="#1a2138" stroke-width="1"/>
+            <text x="14" y="22" font-family="JetBrains Mono" font-size="11" fill="#6a7693">[server log]</text>
+            <g id="srvLog">
+              <text x="14" y="44" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#34d399">→</tspan> Nginx received TCP packet, decrypting TLS…
+              </text>
+              <text x="14" y="62" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#22d3ee">→</tspan> Proxy_pass → 127.0.0.1:3000
+              </text>
+              <text x="14" y="80" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#a78bfa">→</tspan> Router matched: GET /  →  HomeController#index
+              </text>
+              <text x="14" y="98" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#fbbf24">→</tspan> SELECT * FROM pages WHERE slug='home' LIMIT 1   <tspan fill="#6a7693">(3ms)</tspan>
+              </text>
+              <text x="14" y="116" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#a3e635">→</tspan> Rendered home.html.erb in 12ms
+              </text>
+              <text x="14" y="134" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc" class="log-line" opacity="0">
+                <tspan fill="#34d399">✓</tspan> 200 OK · 1.4 KB · total 18ms
+              </text>
+            </g>
+          </g>
+        </g>
+
+        <defs>
+          <marker id="arrow-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#21304d"/>
+          </marker>
+        </defs>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 7 · HTTP 响应
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-7" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <g transform="translate(60,180)">
+          <rect class="node-box" width="120" height="100" rx="8"/>
+          <g transform="translate(28,26)" color="#22d3ee"><use href="#ic-laptop" width="64" height="48"/></g>
+          <text class="node-sub" x="60" y="92" text-anchor="middle">Client</text>
+        </g>
+        <g transform="translate(620,180)">
+          <rect class="node-box" width="120" height="100" rx="8"/>
+          <g transform="translate(32,22)" color="#a78bfa"><use href="#ic-server" width="56" height="56"/></g>
+          <text class="node-sub" x="60" y="92" text-anchor="middle">Server</text>
+        </g>
+
+        <g id="httpResp" transform="translate(440,140)" opacity="0">
+          <rect width="280" height="200" rx="10" fill="#06090f" stroke="#a78bfa" stroke-width="1.5" filter="url(#softglow)"/>
+          <text x="14" y="24" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" font-weight="700">HTTP/1.1 RESPONSE</text>
+          <line x1="14" y1="32" x2="266" y2="32" stroke="#1a2138" stroke-width="1"/>
+          <text x="14" y="52" font-family="JetBrains Mono" font-size="12" fill="#34d399" font-weight="700">HTTP/1.1 <tspan fill="#e8edf7">200 OK</tspan></text>
+          <text x="14" y="72" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Content-Type: <tspan fill="#fbbf24">text/html</tspan></text>
+          <text x="14" y="90" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Content-Length: <tspan fill="#fbbf24">1432</tspan></text>
+          <text x="14" y="108" font-family="JetBrains Mono" font-size="11" fill="#a8b3cc">Cache-Control: <tspan fill="#e8edf7">max-age=3600</tspan></text>
+          <line x1="14" y1="120" x2="266" y2="120" stroke="#1a2138" stroke-width="1"/>
+          <text x="14" y="140" font-family="JetBrains Mono" font-size="10.5" fill="#a3e635">&lt;!DOCTYPE html&gt;</text>
+          <text x="14" y="156" font-family="JetBrains Mono" font-size="10.5" fill="#a3e635">&lt;html&gt;&lt;head&gt;…&lt;/head&gt;</text>
+          <text x="14" y="172" font-family="JetBrains Mono" font-size="10.5" fill="#a3e635">  &lt;body&gt;Hello!&lt;/body&gt;</text>
+          <text x="14" y="188" font-family="JetBrains Mono" font-size="10.5" fill="#a3e635">&lt;/html&gt;</text>
+        </g>
+
+        <path d="M620 230 Q400 230 180 230" stroke="#21304d" stroke-width="1" stroke-dasharray="3 4" fill="none"/>
+
+        <text x="400" y="440" font-family="Inter" font-size="11" fill="#6a7693" text-anchor="middle">
+          状态码 + 头部 + 正文 — 浏览器拿到这块文本后，旅程进入最后一段：渲染
+        </text>
+      </svg>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+           SCENE 8 · 浏览器渲染
+           ═══════════════════════════════════════════════════════════════ -->
+      <svg class="scene" id="scene-8" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+        <!-- HTML → DOM -->
+        <g transform="translate(40,60)">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" font-weight="700">HTML</text>
+          <rect width="180" height="80" rx="8" y="10" fill="#06090f" stroke="#1a2138"/>
+          <text x="14" y="34" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">&lt;html&gt;</text>
+          <text x="14" y="50" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">  &lt;head&gt;…&lt;/head&gt;</text>
+          <text x="14" y="66" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">  &lt;body&gt;…&lt;/body&gt;</text>
+          <text x="14" y="82" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">&lt;/html&gt;</text>
+        </g>
+        <path d="M230 110 L290 110" stroke="#22d3ee" stroke-width="1.2" marker-end="url(#arrow-c2)"/>
+        <g id="dom-tree" transform="translate(300,60)" opacity="0">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="11" fill="#22d3ee" font-weight="700">DOM Tree</text>
+          <!-- tree nodes -->
+          <g font-family="JetBrains Mono" font-size="10" fill="#e8edf7">
+            <circle cx="80" cy="28" r="14" fill="#0a1224" stroke="#22d3ee"/>
+            <text x="80" y="32" text-anchor="middle">html</text>
+            <line x1="80" y1="42" x2="50" y2="62" stroke="#22d3ee" stroke-width="1"/>
+            <line x1="80" y1="42" x2="110" y2="62" stroke="#22d3ee" stroke-width="1"/>
+            <circle cx="50" cy="76" r="12" fill="#0a1224" stroke="#22d3ee"/>
+            <text x="50" y="80" text-anchor="middle" font-size="9">head</text>
+            <circle cx="110" cy="76" r="12" fill="#0a1224" stroke="#22d3ee"/>
+            <text x="110" y="80" text-anchor="middle" font-size="9">body</text>
+          </g>
+        </g>
+
+        <!-- CSS → CSSOM -->
+        <g transform="translate(40,180)">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" font-weight="700">CSS</text>
+          <rect width="180" height="80" rx="8" y="10" fill="#06090f" stroke="#1a2138"/>
+          <text x="14" y="34" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">body { font: 14px sans }</text>
+          <text x="14" y="50" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">h1   { color: #22d3ee }</text>
+          <text x="14" y="66" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc">.box { padding: 16px }</text>
+        </g>
+        <path d="M230 230 L290 230" stroke="#a78bfa" stroke-width="1.2" marker-end="url(#arrow-v2)"/>
+        <g id="cssom-tree" transform="translate(300,180)" opacity="0">
+          <text x="0" y="0" font-family="JetBrains Mono" font-size="11" fill="#a78bfa" font-weight="700">CSSOM</text>
+          <g font-family="JetBrains Mono" font-size="9" fill="#e8edf7">
+            <rect x="0" y="20" width="180" height="64" rx="4" fill="#0a1224" stroke="#a78bfa"/>
+            <text x="10" y="38">body → font:14px sans-serif</text>
+            <text x="10" y="54">h1   → color:#22d3ee</text>
+            <text x="10" y="70">.box → padding:16px</text>
+          </g>
+        </g>
+
+        <!-- 合并 → Render Tree → Layout → Paint -->
+        <g id="renderPipe" transform="translate(520,80)" opacity="0">
+          <rect width="240" height="80" rx="8" fill="rgba(34,211,238,0.06)" stroke="#22d3ee" stroke-dasharray="3 3"/>
+          <text x="120" y="30" font-family="Inter" font-size="12" fill="#22d3ee" text-anchor="middle" font-weight="600">Render Tree</text>
+          <text x="120" y="50" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">DOM ∩ CSSOM</text>
+          <text x="120" y="66" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">（只含会渲染的节点）</text>
+        </g>
+        <path d="M520 200 L520 240" stroke="#fbbf24" stroke-width="1.2" marker-end="url(#arrow-a2)" id="r-arrow-1" opacity="0"/>
+        <g id="layoutBlk" transform="translate(420,240)" opacity="0">
+          <rect width="180" height="50" rx="8" fill="rgba(251,191,36,0.06)" stroke="#fbbf24" stroke-dasharray="3 3"/>
+          <text x="90" y="22" font-family="Inter" font-size="12" fill="#fbbf24" text-anchor="middle" font-weight="600">Layout</text>
+          <text x="90" y="40" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">box 位置 / 大小</text>
+        </g>
+        <g id="paintBlk" transform="translate(620,240)" opacity="0">
+          <rect width="140" height="50" rx="8" fill="rgba(251,113,133,0.06)" stroke="#fb7185" stroke-dasharray="3 3"/>
+          <text x="70" y="22" font-family="Inter" font-size="12" fill="#fb7185" text-anchor="middle" font-weight="600">Paint</text>
+          <text x="70" y="40" font-family="JetBrains Mono" font-size="10" fill="#a8b3cc" text-anchor="middle">填色 / 图层</text>
+        </g>
+
+        <!-- 最终页面 -->
+        <g id="finalPage" transform="translate(220,330)" opacity="0">
+          <rect width="360" height="140" rx="10" fill="#06090f" stroke="#34d399" stroke-width="1.5" filter="url(#softglow)"/>
+          <rect x="14" y="14" width="80" height="12" rx="2" fill="#22d3ee"/>
+          <text x="14" y="56" font-family="Inter Tight" font-size="20" fill="#e8edf7" font-weight="700">Hello, Web!</text>
+          <rect x="14" y="72" width="332" height="6" rx="3" fill="#21304d"/>
+          <rect x="14" y="86" width="280" height="6" rx="3" fill="#21304d"/>
+          <rect x="14" y="100" width="180" height="6" rx="3" fill="#21304d"/>
+          <rect x="14" y="118" width="100" height="14" rx="3" fill="rgba(167,139,250,0.4)"/>
+          <text x="346" y="138" font-family="JetBrains Mono" font-size="9" fill="#34d399" text-anchor="end">✓ painted</text>
+        </g>
+
+        <text x="400" y="490" font-family="Inter" font-size="11" fill="#6a7693" text-anchor="middle">
+          HTML → DOM、CSS → CSSOM，合并成 Render Tree，再经 Layout / Paint / Composite，像素终于出现在屏幕上
+        </text>
+
+        <defs>
+          <marker id="arrow-c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#22d3ee"/>
+          </marker>
+          <marker id="arrow-v2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#a78bfa"/>
+          </marker>
+          <marker id="arrow-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 Z" fill="#fbbf24"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+
+    <!-- ──────────────── Narration panel ──────────────── -->
+    <aside class="narrate">
+
+      <div class="pane" data-pane="1">
+        <div class="scene-num">SCENE 01 · 起点</div>
+        <h2>你按下了回车键</h2>
+        <p class="body">
+          一切从一行字开始：<code>https://example.com</code>。
+          它看起来只是浏览器地址栏里的一段文本，但按下回车的瞬间，<em>背后正在动员一整套互联网基础设施</em> ——
+          DNS 服务器、路由器、操作系统、Web 服务器、数据库，最后才是你眼前的像素。
+        </p>
+        <div class="codeblk" data-lang="URL">
+<span class="k">https</span>://<span class="h">example.com</span>:<span class="n">443</span><span class="v">/</span>
+<span class="c"># ┬     ┬             ┬   ┬</span>
+<span class="c"># │     │             │   └─ 路径 path</span>
+<span class="c"># │     │             └───── 端口 port（HTTPS 默认 443）</span>
+<span class="c"># │     └─────────────────── 主机名 hostname（需要先翻译）</span>
+<span class="c"># └─────────────────────────── 协议 scheme</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="2">
+        <div class="scene-num">SCENE 02 · 名字翻译</div>
+        <h2>DNS：把名字变成地址</h2>
+        <p class="body">
+          互联网底层只认 IP 不认名字。浏览器先问<em>本地 DNS Resolver</em>，
+          Resolver 一级级向上：<code>Root → .com TLD → example.com 权威服务器</code>，
+          最终拿到 <code>93.184.216.34</code>，然后缓存起来。
+        </p>
+        <div class="codeblk" data-lang="terminal">
+$ <span class="k">dig</span> <span class="h">example.com</span> +short
+<span class="n">93.184.216.34</span>
+
+$ <span class="k">dig</span> <span class="h">example.com</span>
+<span class="c">;; ANSWER SECTION:</span>
+example.com.  <span class="n">86400</span>  IN  A  <span class="n">93.184.216.34</span>
+<span class="c">;; Query time: 12 msec</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="3">
+        <div class="scene-num">SCENE 03 · 建立连接</div>
+        <h2>TCP 三次握手</h2>
+        <p class="body">
+          有了 IP 还不够。TCP 是<em>可靠</em>的传输协议 —— 在发数据前要先建立一条"连接"。
+          流程像两个人见面打招呼三次：客户端说 <code>SYN</code>，服务器回 <code>SYN+ACK</code>，客户端再 <code>ACK</code> 确认。
+          至此双方都确认了对方能收发数据，连接正式建立。
+        </p>
+        <div class="codeblk" data-lang="trace">
+<span class="c"># tcpdump trace</span>
+<span class="n">10:23:01.001</span>  Client → Server  Flags=<span class="h">SYN</span>     seq=<span class="n">1000</span>
+<span class="n">10:23:01.024</span>  Server → Client  Flags=<span class="h">SYN,ACK</span> seq=<span class="n">5000</span> ack=<span class="n">1001</span>
+<span class="n">10:23:01.025</span>  Client → Server  Flags=<span class="h">ACK</span>     ack=<span class="n">5001</span>
+<span class="c"># RTT ≈ 24ms · 连接已建立</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="4">
+        <div class="scene-num">SCENE 04 · 上锁</div>
+        <h2>TLS 握手：建立加密通道</h2>
+        <p class="body">
+          因为是 <code>https://</code>，在 TCP 之上还要做一次 <em>TLS 握手</em>。
+          浏览器先发 <code>ClientHello</code> 告诉服务器自己支持的密码套件；
+          服务器回 <code>ServerHello</code> 选定算法、附上 <em>证书</em>；浏览器验证证书后双方协商出一个对称密钥。
+          之后所有 HTTP 报文都用这把密钥加密。
+        </p>
+        <div class="codeblk" data-lang="tls">
+<span class="c"># 证书验证：浏览器检查三件事</span>
+1. <span class="h">签名链</span>  : 证书是不是受信 CA 签发的？
+2. <span class="h">域名匹配</span>: 证书里的 CN/SAN 是不是 example.com？
+3. <span class="h">有效期</span>  : notBefore ≤ now ≤ notAfter
+
+<span class="c"># 任何一项失败 → 浏览器弹出"不安全"警告</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="5">
+        <div class="scene-num">SCENE 05 · 发出请求</div>
+        <h2>HTTP 请求：一封纯文本"信"</h2>
+        <p class="body">
+          很多人以为 HTTP 神秘，其实它就是<em>一段格式化的纯文本</em>。
+          第一行写动词和路径，后面跟若干 <code>Header: Value</code>，最后空一行 —— 就这么简单。
+          GET 请求通常没有 body；POST/PUT 才在空行后跟正文。
+        </p>
+        <div class="codeblk" data-lang="HTTP">
+<span class="h">GET</span> / <span class="k">HTTP/1.1</span>
+Host: <span class="n">example.com</span>
+User-Agent: <span class="v">Mozilla/5.0 (Macintosh; Intel Mac OS X)</span>
+Accept: <span class="v">text/html,application/xhtml+xml</span>
+Accept-Language: <span class="v">zh-CN,zh;q=0.9</span>
+Accept-Encoding: <span class="v">gzip, deflate, br</span>
+Connection: <span class="v">keep-alive</span>
+
+<span class="c"># 空行表示 header 结束，GET 没有 body</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="6">
+        <div class="scene-num">SCENE 06 · 服务器内部</div>
+        <h2>请求在服务器里的旅程</h2>
+        <p class="body">
+          报文到了服务器，先被 <em>反向代理</em>（Nginx）接住、做 TLS 终止；
+          然后转给应用进程，<em>路由器</em>匹配 URL 找到对应的 handler；
+          handler 执行业务逻辑，可能去 <em>数据库</em> 取数据、渲染模板，最后把响应交回去。
+        </p>
+        <div class="codeblk" data-lang="server log">
+<span class="c">[2026-05-17 10:23:01.027]</span>
+<span class="h">→</span> nginx[1]: proxy_pass to upstream :3000
+<span class="h">→</span> rails[3000]: Started GET "/" for <span class="n">203.0.113.5</span>
+<span class="h">→</span> rails[3000]: Routed to <span class="k">HomeController#index</span>
+<span class="h">→</span> rails[3000]:   SELECT * FROM pages WHERE slug=<span class="s">'home'</span>  <span class="c">(3ms)</span>
+<span class="h">→</span> rails[3000]: Rendered <span class="v">home.html.erb</span> (12ms)
+<span class="h">✓</span> rails[3000]: Completed <span class="n">200</span> OK in <span class="n">18ms</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="7">
+        <div class="scene-num">SCENE 07 · 回程</div>
+        <h2>HTTP 响应：返程的信</h2>
+        <p class="body">
+          响应的结构和请求几乎对称 —— 第一行是<em>状态码</em>（200/404/500…），
+          后面是头部（告诉浏览器内容类型、长度、缓存策略），空行之后才是真正的 body。
+          浏览器拿到这块文本，旅程进入最后一段：渲染。
+        </p>
+        <div class="codeblk" data-lang="HTTP">
+<span class="k">HTTP/1.1</span> <span class="n">200</span> <span class="h">OK</span>
+Content-Type: <span class="v">text/html; charset=utf-8</span>
+Content-Length: <span class="n">1432</span>
+Cache-Control: <span class="v">public, max-age=3600</span>
+Date: <span class="v">Sun, 17 May 2026 10:23:01 GMT</span>
+
+<span class="s">&lt;!DOCTYPE html&gt;</span>
+<span class="s">&lt;html&gt;&lt;head&gt;&lt;title&gt;Example&lt;/title&gt;&lt;/head&gt;</span>
+<span class="s">  &lt;body&gt;Hello!&lt;/body&gt;</span>
+<span class="s">&lt;/html&gt;</span>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="8">
+        <div class="scene-num">SCENE 08 · 终点</div>
+        <h2>浏览器把字节变成像素</h2>
+        <p class="body">
+          浏览器把 HTML 解析成 <em>DOM 树</em>，CSS 解析成 <em>CSSOM 树</em>，二者合并成 <em>Render Tree</em>（只包含会渲染的节点）。
+          接着 <code>Layout</code> 算出每个盒子的位置和尺寸，<code>Paint</code> 涂色并切分图层，最后由 GPU <code>Composite</code> 合成 ——
+          像素终于出现在屏幕上。<em>整段旅程通常不到 200ms。</em>
+        </p>
+        <div class="codeblk" data-lang="performance">
+<span class="c">// Chrome DevTools · Performance Timeline</span>
+DNS lookup        ▌ 12ms
+TCP handshake     ▌ 24ms
+TLS handshake     ▌▌ 38ms
+Request sent      ▌ 1ms
+Waiting (TTFB)    ▌▌▌ 52ms
+Content download  ▌▌ 18ms
+Parse HTML        ▌▌ 14ms
+Layout + Paint    ▌▌▌ 28ms
+                  <span class="h">────────────────</span>
+Total             <span class="n">187ms</span>  <span class="c">✓ 已上屏</span>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btnPrev">◀ 上一节 <span class="kbd">←</span></button>
+    <button class="btn primary" id="btnPlay">▶ 播放 <span class="kbd">Space</span></button>
+    <button class="btn" id="btnNext">下一节 ▶ <span class="kbd">→</span></button>
+    <button class="btn" id="btnRestart">↻ 重播本节 <span class="kbd">R</span></button>
+    <button class="btn" id="btnMute">🔊 旁白开 <span class="kbd">M</span></button>
+    <div class="ctrl-spacer"></div>
+    <div class="chapter-title" id="chapterTitle">
+      <b>第 1 节</b> · 你按下了回车键
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ───────────────────────────────────────────────────────
+// 章节数据
+// ───────────────────────────────────────────────────────
+const CHAPTERS = [
+  { id:1, title:"你按下了回车键", duration:11000,
+    narration:"一切从一行字开始。https 冒号 example.com 看起来只是地址栏里的几个字符。但按下回车的瞬间，背后正在动员一整套互联网基础设施。" },
+  { id:2, title:"DNS：名字翻译", duration:14000,
+    narration:"互联网底层只认 IP 不认名字。浏览器先问本地的 DNS Resolver。Resolver 一级级向上找，Root、TLD、最后到 example.com 的权威服务器。拿到 93 点 184 点 216 点 34 这个 IP 地址。" },
+  { id:3, title:"TCP 三次握手", duration:13000,
+    narration:"有了 IP 还不够。TCP 是可靠的传输协议，在发数据前要先建立连接。客户端发 SYN，服务器回 SYN 加 ACK，客户端再 ACK 确认。三次握手完成，双方都确认对方能收发数据。" },
+  { id:4, title:"TLS 握手", duration:15000,
+    narration:"因为是 HTTPS，在 TCP 之上还要做一次 TLS 握手。浏览器先发 ClientHello，告诉服务器自己支持的密码套件。服务器回 ServerHello，附上证书。浏览器验证证书后，双方协商出一个对称密钥。之后所有 HTTP 报文都用这把密钥加密。" },
+  { id:5, title:"HTTP 请求", duration:12000,
+    narration:"HTTP 请求其实是一段格式化的纯文本。第一行写动词和路径，后面跟若干 Header 行，最后空一行。就这么简单。GET 请求通常没有 body，POST 才在空行后跟正文。" },
+  { id:6, title:"服务器内部处理", duration:14000,
+    narration:"报文到了服务器。先被 Nginx 这类反向代理接住、做 TLS 终止，然后转给应用进程。路由器匹配 URL 找到对应的 handler。handler 执行业务逻辑，可能去数据库取数据，渲染模板，最后把响应交回去。" },
+  { id:7, title:"HTTP 响应", duration:12000,
+    narration:"响应的结构和请求几乎对称。第一行是状态码，后面是头部，告诉浏览器内容类型、长度、缓存策略。空行之后才是真正的 body。浏览器拿到这块文本，旅程进入最后一段：渲染。" },
+  { id:8, title:"浏览器渲染上屏", duration:14000,
+    narration:"浏览器把 HTML 解析成 DOM 树，CSS 解析成 CSSOM 树。两棵树合并成 Render Tree。接着 Layout 算出每个盒子的位置和尺寸，Paint 涂色并切分图层，最后由 GPU 合成。像素终于出现在屏幕上。整段旅程通常不到 200 毫秒。" },
+];
+
+// ───────────────────────────────────────────────────────
+// 状态机
+// ───────────────────────────────────────────────────────
+const state = {
+  index: 0,
+  playing: false,
+  visited: new Set([0]),
+  sceneTimer: null,
+  sceneStart: 0,
+  rafId: null,
+  ttsEnabled: true,
+  ttsSpeaking: false,
+};
+
+// ───────────────────────────────────────────────────────
+// TTS · MP3 优先，回退 Web Speech
+// ───────────────────────────────────────────────────────
+let useMp3 = null, currentAudio = null, cnVoice = null;
+
+function loadVoices(){
+  if (!('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices();
+  cnVoice = voices.find(v => v.lang.startsWith('zh') && /premium|enhanced|neural/i.test(v.name))
+         || voices.find(v => v.lang.startsWith('zh-CN') || v.lang.startsWith('zh-Hans'))
+         || voices.find(v => v.lang.startsWith('zh'))
+         || null;
+}
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = loadVoices;
+  loadVoices();
+}
+
+async function detectMp3(){
+  if (useMp3 !== null) return useMp3;
+  try {
+    const a = new Audio('audio/scene-1.mp3');
+    await new Promise((resolve, reject) => {
+      a.oncanplaythrough = resolve;
+      a.onloadedmetadata = resolve;
+      a.onerror = reject;
+      setTimeout(reject, 1500);
+      a.load();
+    });
+    useMp3 = true;
+    console.log('[TTS] using MP3 narration');
+  } catch {
+    useMp3 = false;
+    console.log('[TTS] MP3 not found → fallback to Web Speech API');
+  }
+  return useMp3;
+}
+
+function webSpeak(text, onEnd){
+  if (!('speechSynthesis' in window)) { onEnd && onEnd(); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN'; u.rate = 1.05; u.pitch = 1.0;
+  if (cnVoice) u.voice = cnVoice;
+  u.onstart = () => { state.ttsSpeaking = true; };
+  u.onend   = () => { state.ttsSpeaking = false; onEnd && onEnd(); };
+  u.onerror = () => { state.ttsSpeaking = false; onEnd && onEnd(); };
+  speechSynthesis.speak(u);
+}
+
+async function speak(text, idx, onEnd){
+  if (!state.ttsEnabled || !text) { onEnd && onEnd(); return; }
+  stopSpeak();
+  const can = await detectMp3();
+  if (can) {
+    const a = new Audio(`audio/scene-${idx+1}.mp3`);
+    currentAudio = a;
+    a.onplay  = () => { state.ttsSpeaking = true; };
+    a.onended = () => {
+      state.ttsSpeaking = false;
+      if (currentAudio === a) currentAudio = null;
+      onEnd && onEnd();
+    };
+    a.onerror = () => {
+      console.warn('[TTS] mp3 error, fallback to Web Speech');
+      if (currentAudio === a) currentAudio = null;
+      webSpeak(text, onEnd);
+    };
+    a.play().catch(err => {
+      console.warn('[TTS] mp3 play() rejected:', err);
+      if (currentAudio === a) currentAudio = null;
+      webSpeak(text, onEnd);
+    });
+  } else {
+    webSpeak(text, onEnd);
+  }
+}
+
+function stopSpeak(){
+  if (currentAudio) {
+    currentAudio.onended = null;
+    currentAudio.onerror = null;
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  state.ttsSpeaking = false;
+}
+
+// ───────────────────────────────────────────────────────
+// 顶部章节 chips
+// ───────────────────────────────────────────────────────
+const chipsEl = document.getElementById('chips');
+CHAPTERS.forEach((c, i) => {
+  const el = document.createElement('div');
+  el.className = 'chip';
+  el.title = `${i+1}. ${c.title}`;
+  el.addEventListener('click', () => goTo(i));
+  chipsEl.appendChild(el);
+});
+
+function refreshChips(){
+  [...chipsEl.children].forEach((el, i) => {
+    el.classList.toggle('active', i === state.index);
+    el.classList.toggle('done', state.visited.has(i) && i !== state.index);
+  });
+}
+
+// ───────────────────────────────────────────────────────
+// 切换 scene
+// ───────────────────────────────────────────────────────
+function goTo(i){
+  if (i < 0 || i >= CHAPTERS.length) return;
+  state.index = i;
+  state.visited.add(i);
+
+  // 切换 SVG
+  document.querySelectorAll('svg.scene').forEach(svg => svg.classList.remove('active'));
+  document.getElementById(`scene-${i+1}`).classList.add('active');
+
+  // 切换文案
+  document.querySelectorAll('.narrate .pane').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.narrate .pane[data-pane="${i+1}"]`).classList.add('active');
+
+  // 更新 UI
+  document.getElementById('cornerIx').textContent = `SCENE ${String(i+1).padStart(2,'0')}`;
+  document.getElementById('progressLabel').textContent = `${i+1}/${CHAPTERS.length}`;
+  document.getElementById('progressFill').style.width = `${(i+1)/CHAPTERS.length * 100}%`;
+  document.getElementById('chapterTitle').innerHTML = `<b>第 ${i+1} 节</b> · ${CHAPTERS[i].title}`;
+  refreshChips();
+
+  // 重置 scene 计时
+  resetSceneTimer();
+  runScene(i+1);
+  if (state.playing) {
+    startCurrentScene();
+  } else {
+    speak(CHAPTERS[i].narration, i);
+  }
+}
+
+// ────────────── 自动推进（按口播结束驱动） ──────────────
+const ADVANCE_BUFFER_MS = 1200;
+const SAFETY_MAX_MS     = 60000;
+
+function advance(){
+  resetSceneTimer();
+  if (state.index < CHAPTERS.length - 1) {
+    goTo(state.index + 1);
+  } else {
+    state.playing = false; updatePlayBtn(); stopSpeak();
+  }
+}
+function scheduleAdvance(ms){
+  if (state.sceneTimer) clearTimeout(state.sceneTimer);
+  state.sceneTimer = setTimeout(advance, ms);
+}
+function resetSceneTimer(){
+  if (state.sceneTimer) clearTimeout(state.sceneTimer); state.sceneTimer = null;
+  if (state.rafId) cancelAnimationFrame(state.rafId); state.rafId = null;
+}
+function tickTime(){
+  const elapsed = performance.now() - state.sceneStart;
+  const f = ms => {
+    const t = Math.max(0, Math.floor(ms/1000));
+    return String(Math.floor(t/60)).padStart(2,'0') + ':' + String(t%60).padStart(2,'0');
+  };
+  document.getElementById('stageTime').textContent = `${f(elapsed)} / ${f(CHAPTERS[state.index].duration)}`;
+  if (state.playing) state.rafId = requestAnimationFrame(tickTime);
+}
+
+function startCurrentScene(){
+  state.sceneStart = performance.now();
+  const text = CHAPTERS[state.index].narration;
+  if (state.ttsEnabled && text) {
+    scheduleAdvance(SAFETY_MAX_MS);
+    speak(text, state.index, () => {
+      if (state.playing) scheduleAdvance(ADVANCE_BUFFER_MS);
+    });
+  } else {
+    scheduleAdvance(CHAPTERS[state.index].duration);
+  }
+  tickTime();
+}
+
+function play(){
+  if (state.playing) return;
+  state.playing = true; updatePlayBtn();
+  startCurrentScene();
+}
+function pause(){
+  state.playing = false; updatePlayBtn();
+  resetSceneTimer(); stopSpeak();
+}
+function togglePlay(){ state.playing ? pause() : play(); }
+function updatePlayBtn(){
+  document.getElementById('btnPlay').innerHTML =
+    state.playing ? '⏸ 暂停 <span class="kbd">Space</span>' : '▶ 播放 <span class="kbd">Space</span>';
+}
+
+// ───────────────────────────────────────────────────────
+// 控件
+// ───────────────────────────────────────────────────────
+function restartCurrent(){
+  resetSceneTimer();
+  runScene(state.index + 1);
+  if (state.playing) startCurrentScene();
+  else speak(CHAPTERS[state.index].narration, state.index);
+}
+document.getElementById('btnPrev').onclick = () => goTo(state.index - 1);
+document.getElementById('btnNext').onclick = () => goTo(state.index + 1);
+document.getElementById('btnPlay').onclick = togglePlay;
+document.getElementById('btnRestart').onclick = restartCurrent;
+document.getElementById('btnMute').onclick = () => {
+  state.ttsEnabled = !state.ttsEnabled;
+  document.getElementById('btnMute').innerHTML =
+    state.ttsEnabled ? '🔊 旁白开 <span class="kbd">M</span>' : '🔇 旁白关 <span class="kbd">M</span>';
+  stopSpeak();
+  if (state.playing) startCurrentScene();
+  else if (state.ttsEnabled) speak(CHAPTERS[state.index].narration, state.index);
+};
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft')  goTo(state.index - 1);
+  if (e.key === 'ArrowRight') goTo(state.index + 1);
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  if (e.key === 'r' || e.key === 'R') restartCurrent();
+  if (e.key === 'm' || e.key === 'M') document.getElementById('btnMute').click();
+});
+
+// ───────────────────────────────────────────────────────
+// 每个场景的动画
+// ───────────────────────────────────────────────────────
+const sceneTimers = [];
+function schedule(fn, delay){
+  const id = setTimeout(fn, delay);
+  sceneTimers.push(id);
+}
+function clearScene(){
+  sceneTimers.splice(0).forEach(clearTimeout);
+}
+function resetEl(...ids){
+  ids.forEach(id => {
+    const el = typeof id === 'string' ? document.getElementById(id) : id;
+    if (el) el.setAttribute('opacity', '0');
+  });
+}
+function showEl(id, delay=0, opacity=1){
+  schedule(() => {
+    const el = typeof id === 'string' ? document.getElementById(id) : id;
+    if (el) {
+      el.style.transition = 'opacity 0.5s ease';
+      el.setAttribute('opacity', String(opacity));
+    }
+  }, delay);
+}
+
+function runScene(n){
+  clearScene();
+  if (n === 1) scene1();
+  if (n === 2) scene2();
+  if (n === 3) scene3();
+  if (n === 4) scene4();
+  if (n === 5) scene5();
+  if (n === 6) scene6();
+  if (n === 7) scene7();
+  if (n === 8) scene8();
+}
+
+// Scene 1: 打字 URL
+function scene1(){
+  const text = 'https://example.com';
+  const target = document.getElementById('urlTyping');
+  const caret = document.getElementById('urlCaret');
+  const enterHint = document.getElementById('enterHint');
+  const pageText = document.getElementById('pageText');
+  target.textContent = '';
+  caret.style.opacity = 1;
+  enterHint.setAttribute('opacity', '0');
+  pageText.textContent = '等待加载…';
+  pageText.setAttribute('fill', '#6a7693');
+
+  for (let i = 0; i < text.length; i++) {
+    schedule(() => { target.textContent = text.slice(0, i+1); }, 300 + i * 90);
+  }
+  // 显示 enter 提示
+  schedule(() => enterHint.setAttribute('opacity', '1'), 2800);
+  schedule(() => enterHint.setAttribute('opacity', '0'), 4400);
+  // 页面显示"加载中"
+  schedule(() => {
+    pageText.textContent = '⋯ 正在连接 example.com';
+    pageText.setAttribute('fill', '#22d3ee');
+  }, 4400);
+}
+
+// Scene 2: DNS 飞包
+function scene2(){
+  const layer = document.getElementById('dnsPackets');
+  layer.innerHTML = '';
+  resetEl('dnsResult');
+
+  // 创建飞行 packet：从 from(x,y) 到 to(x,y)
+  function fly(fx, fy, tx, ty, color, label, delay){
+    schedule(() => {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('transform', `translate(${fx},${fy})`);
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('r', '7'); c.setAttribute('fill', color);
+      c.setAttribute('filter', 'url(#glow)');
+      g.appendChild(c);
+      if (label){
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('x', '0'); t.setAttribute('y', '-12');
+        t.setAttribute('text-anchor', 'middle');
+        t.setAttribute('font-family', 'JetBrains Mono');
+        t.setAttribute('font-size', '10');
+        t.setAttribute('fill', color);
+        t.textContent = label;
+        g.appendChild(t);
+      }
+      layer.appendChild(g);
+      // 动画：translate
+      let startT = null; const dur = 800;
+      function step(ts){
+        if (!startT) startT = ts;
+        const p = Math.min(1, (ts - startT)/dur);
+        const cx = fx + (tx - fx) * p;
+        const cy = fy + (ty - fy) * p;
+        g.setAttribute('transform', `translate(${cx},${cy})`);
+        if (p < 1) requestAnimationFrame(step);
+        else g.remove();
+      }
+      requestAnimationFrame(step);
+    }, delay);
+  }
+
+  // 客户端 → resolver
+  fly(160, 250, 220, 250, '#22d3ee', 'example.com?', 400);
+  // resolver → root
+  fly(340, 250, 420, 68, '#a78bfa', '?', 1400);
+  // root → resolver (refers to .com)
+  fly(420, 68, 340, 250, '#fbbf24', '→ TLD', 2400);
+  // resolver → tld
+  fly(340, 250, 540, 198, '#a78bfa', '?', 3200);
+  // tld → resolver (refers to authoritative)
+  fly(540, 198, 340, 250, '#fbbf24', '→ NS', 4200);
+  // resolver → authoritative
+  fly(340, 250, 540, 328, '#a78bfa', '?', 5000);
+  // authoritative → resolver (returns A record)
+  fly(540, 328, 340, 250, '#34d399', 'A 93.184.216.34', 6000);
+  // resolver → client
+  fly(220, 250, 160, 250, '#34d399', '✓', 6800);
+
+  // 显示最终答案
+  showEl('dnsResult', 7000);
+}
+
+// Scene 3: TCP 三次握手
+function scene3(){
+  resetEl('tcp-syn', 'tcp-synack', 'tcp-ack', 'tcp-est');
+  showEl('tcp-syn', 600);
+  showEl('tcp-synack', 1800);
+  showEl('tcp-ack', 3000);
+  showEl('tcp-est', 4200);
+}
+
+// Scene 4: TLS
+function scene4(){
+  resetEl('tls-hello', 'tls-shello', 'tls-verify', 'tls-key', 'tls-done');
+  showEl('tls-hello', 500);
+  showEl('tls-shello', 1700);
+  showEl('tls-verify', 3000);
+  showEl('tls-key', 4500);
+  showEl('tls-done', 5800);
+}
+
+// Scene 5: HTTP 请求飞过去
+function scene5(){
+  const pkt = document.getElementById('httpPacket');
+  pkt.setAttribute('opacity', '0');
+  pkt.setAttribute('transform', 'translate(180,160)');
+  // 淡入
+  schedule(() => {
+    pkt.style.transition = 'opacity 0.5s';
+    pkt.setAttribute('opacity', '1');
+  }, 400);
+  // 飞过去：translate x 从 180 到 440
+  schedule(() => {
+    const start = performance.now();
+    const dur = 2400;
+    function step(ts){
+      const p = Math.min(1, (ts - start)/dur);
+      const ease = 0.5 - Math.cos(p * Math.PI)/2;
+      const x = 180 + (380) * ease;
+      pkt.setAttribute('transform', `translate(${x},160)`);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }, 1400);
+  // 到达后淡出
+  schedule(() => {
+    pkt.style.transition = 'opacity 0.4s';
+    pkt.setAttribute('opacity', '0');
+  }, 4200);
+}
+
+// Scene 6: 服务器内部 — 流水线逐段闪 + 日志逐行
+function scene6(){
+  // 闪 stages
+  const stages = ['srv-1','srv-2','srv-3','srv-4'];
+  stages.forEach((id, i) => {
+    schedule(() => {
+      const g = document.getElementById(id);
+      const rect = g.querySelector('rect');
+      if (rect){
+        rect.style.transition = 'all 0.3s';
+        rect.setAttribute('stroke', '#22d3ee');
+        rect.setAttribute('fill', 'rgba(34,211,238,0.10)');
+        setTimeout(() => {
+          rect.setAttribute('stroke', '#21304d');
+          rect.setAttribute('fill', '#131c33');
+        }, 700);
+      }
+    }, 400 + i * 900);
+  });
+
+  // 日志逐行
+  const logs = document.querySelectorAll('#srvLog .log-line');
+  logs.forEach((el, i) => {
+    el.setAttribute('opacity', '0');
+    schedule(() => {
+      el.style.transition = 'opacity 0.4s';
+      el.setAttribute('opacity', '1');
+    }, 800 + i * 750);
+  });
+}
+
+// Scene 7: HTTP 响应飞回
+function scene7(){
+  const pkt = document.getElementById('httpResp');
+  pkt.setAttribute('opacity', '0');
+  pkt.setAttribute('transform', 'translate(440,140)');
+  schedule(() => {
+    pkt.style.transition = 'opacity 0.5s';
+    pkt.setAttribute('opacity', '1');
+  }, 400);
+  schedule(() => {
+    const start = performance.now();
+    const dur = 2400;
+    function step(ts){
+      const p = Math.min(1, (ts - start)/dur);
+      const ease = 0.5 - Math.cos(p * Math.PI)/2;
+      const x = 440 - (380) * ease;
+      pkt.setAttribute('transform', `translate(${x},140)`);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }, 1400);
+}
+
+// Scene 8: 渲染流水线
+function scene8(){
+  resetEl('dom-tree','cssom-tree','renderPipe','r-arrow-1','layoutBlk','paintBlk','finalPage');
+  showEl('dom-tree',    600);
+  showEl('cssom-tree', 1600);
+  showEl('renderPipe', 3000);
+  showEl('r-arrow-1',  4000);
+  showEl('layoutBlk',  4500);
+  showEl('paintBlk',   5500);
+  showEl('finalPage',  6700);
+}
+
+// ───────────────────────────────────────────────────────
+// 初始化：先 playing=true，再 goTo(0) — 让 goTo 内部走 startCurrentScene()
+// ───────────────────────────────────────────────────────
+state.playing = true;
+updatePlayBtn();
+goTo(0);
+</script>
+
+</body>
+</html>

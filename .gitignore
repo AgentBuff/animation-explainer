@@ -1,0 +1,49 @@
+# ─── Dependencies ──────────────────────────────
+node_modules/
+
+# ─── 派生产物 · 不入 git ───────────────────────
+# 视频体积大（5MB+/demo），需要分发时本地重生即可
+examples/*/video.mp4
+*.webm
+
+# Playwright 录制临时目录（脚本内会清理，保险起见 ignore）
+**/.video-tmp/
+
+# ─── 日志 ──────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+
+# ─── 环境变量 / 敏感信息 ──────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── Playwright 测试产物 ───────────────────────
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ─── 操作系统 ──────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── 编辑器 / IDE ──────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.windsurf/
+
+# ─── Claude / AI tooling ───────────────────────
+# 本地 settings 不入 git（团队成员各自配置）
+.claude/settings.local.json

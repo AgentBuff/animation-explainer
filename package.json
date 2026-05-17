@@ -1,0 +1,20 @@
+{
+  "name": "animation-video-learning-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "把技术原理做成剧场式动画 HTML 的 skill（含 TTS 旁白）",
+  "scripts": {
+    "audio": "node scripts/generate-audio.mjs",
+    "audio:vue": "node scripts/generate-audio.mjs examples/vue-internals",
+    "audio:browser": "node scripts/generate-audio.mjs examples/browser-request",
+    "video": "node scripts/export-video.mjs",
+    "video:vue": "node scripts/export-video.mjs examples/vue-internals",
+    "video:browser": "node scripts/export-video.mjs examples/browser-request",
+    "video:install": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.5",
+    "playwright": "^1.50.0"
+  }
+}
