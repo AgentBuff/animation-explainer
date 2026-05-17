@@ -6,6 +6,10 @@ node_modules/
 examples/*/video.mp4
 *.webm
 
+# 公众号渲染产物（用 /bm-md 重新生成）
+article.wechat.html
+article.wechat.preview.html
+
 # Playwright 录制临时目录（脚本内会清理，保险起见 ignore）
 **/.video-tmp/
 

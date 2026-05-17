@@ -152,36 +152,36 @@ speak(text, idx, () => {
 
 ## 五、如何使用
 
-整套技能已经开源（链接在文末）。
-
-**一次性安装：**
+整套技能已经开源，**一行命令装到你的 AI agent**：
 
 ```bash
-git clone <repo>
-cd animation-video-learning-skills
+npx skills add AgentBuff/animation-explainer
+```
+
+适配 Claude Code / Cursor / Codex / Cline / Gemini CLI / Windsurf 等 50+ agent。装完直接跟你的 agent 说：
+
+> 用 animation-explainer 给我做一个 **[主题]** 的动画演示
+
+例如："做一个 git rebase 的动画演示"、"把 V8 JS 编译过程讲清楚"、"用动画解释 Postgres 的 MVCC"。
+
+---
+
+如果想完整跑全套工具链（包括 MP4 导出），克隆下来即可：
+
+```bash
+git clone https://github.com/AgentBuff/animation-explainer.git
+cd animation-explainer
 npm install
-npx playwright install chromium    # 第一次跑视频导出前需要
-```
+npx playwright install chromium    # 视频导出需要
 
-**看现有 demo：**
+# 看现有 demo
+open examples/browser-request/index.html
+open examples/vue-internals/index.html
 
-```bash
-open examples/browser-request/index.html    # 浏览器请求底层
-open examples/vue-internals/index.html      # Vue 3 原理
-```
-
-**导出视频：**
-
-```bash
+# 导出 MP4
 npm run video:vue
 npm run video:browser
 ```
-
-**做新主题（如果你在用 Claude Code）：**
-
-跟 Claude 说：
-
-> 用 animation-explainer skill 给我做一个 [主题] 的动画演示
 
 例如：
 
@@ -229,9 +229,9 @@ npm run video:browser
 
 ---
 
-**项目地址**：[GitHub 仓库链接放这里]
+**项目地址**：https://github.com/AgentBuff/animation-explainer
 
-**关注我**：[公众号信息]，下一篇打算用这套工具做一份《Postgres 一条 SQL 是怎么执行的》动画视频。
+下一篇打算用这套工具做一份《Postgres 一条 SQL 是怎么执行的》动画视频。
 
 ---
 
