@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>animation-explainer · social preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    width: 1280px; height: 640px;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: #e8edf7;
+    background:
+      radial-gradient(900px 600px at 78% 18%, rgba(66,184,131,0.20), transparent 60%),
+      radial-gradient(800px 500px at 8% 88%, rgba(34,211,238,0.15), transparent 60%),
+      radial-gradient(600px 400px at 95% 95%, rgba(167,139,250,0.12), transparent 65%),
+      linear-gradient(155deg, #060912 0%, #04060e 60%, #060912 100%);
+    overflow: hidden; position: relative;
+  }
+  /* 网格背景 */
+  body::before{
+    content:""; position: absolute; inset:0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(120,140,200,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,140,200,0.05) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask: radial-gradient(ellipse 80% 70% at 50% 50%, black 50%, transparent 100%);
+  }
+
+  .wrap{
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: 1.05fr 1fr;
+    width: 100%; height: 100%;
+    padding: 56px 64px;
+    gap: 56px;
+    align-items: center;
+  }
+
+  /* ─────── 左侧：迷你 demo 舞台 ─────── */
+  .stage{
+    position: relative;
+    background:
+      radial-gradient(500px 350px at 30% 25%, rgba(66,184,131,0.08), transparent 60%),
+      #0e1525;
+    border: 1px solid #21304d;
+    border-radius: 18px;
+    box-shadow:
+      0 30px 80px -20px rgba(0,0,0,0.6),
+      0 0 0 1px rgba(120,140,200,0.04) inset;
+    overflow: hidden;
+    aspect-ratio: 16/10;
+  }
+  .stage-bar{
+    display: flex; align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(120,140,200,0.10);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: #6a7693; letter-spacing: 0.12em;
+  }
+  .stage-bar .dot{
+    width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+    background: linear-gradient(135deg, #42b883, #22d3ee);
+    box-shadow: 0 0 10px rgba(66,184,131,0.6);
+  }
+  .stage-bar .chips{ margin-left: auto; display: flex; gap: 4px; }
+  .stage-bar .chip{ width: 20px; height: 12px; border-radius: 3px; background: rgba(120,140,200,0.10); }
+  .stage-bar .chip.done{ background: rgba(52,211,153,0.30); }
+  .stage-bar .chip.active{ background: linear-gradient(90deg, #42b883, #22d3ee); box-shadow: 0 0 8px rgba(34,211,238,0.5); }
+
+  .stage-canvas{
+    position: relative;
+    padding: 18px 20px 12px;
+    height: calc(100% - 78px);
+  }
+
+  /* TCP 三次握手简化版（Scene 3） */
+  .col{
+    position: absolute;
+    width: 28%;
+    text-align: center;
+  }
+  .col.client{ left: 6%; top: 14px; }
+  .col.server{ right: 6%; top: 14px; }
+  .col-box{
+    border: 1px solid #21304d;
+    background: #131c33;
+    border-radius: 8px;
+    padding: 10px 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: #e8edf7;
+  }
+  .col-box .sub{
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #6a7693;
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  .col-line{
+    margin: 4px auto 0;
+    width: 1px; height: 200px;
+    background: repeating-linear-gradient(to bottom, #21304d 0, #21304d 3px, transparent 3px, transparent 6px);
+  }
+
+  .pkt{
+    position: absolute;
+    border-radius: 6px;
+    border: 1px solid;
+    background: #06090f;
+    padding: 6px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    text-align: center;
+    box-shadow: 0 0 16px rgba(0,0,0,0.4);
+  }
+  .pkt .label{ font-size: 11px; font-weight: 700; }
+  .pkt .meta{ font-size: 9px; color: #a8b3cc; margin-top: 2px; }
+
+  .pkt.syn{
+    left: 26%; top: 92px; width: 48%;
+    border-color: #22d3ee;
+  }
+  .pkt.syn .label{ color: #22d3ee; }
+  .pkt.synack{
+    left: 26%; top: 145px; width: 48%;
+    border-color: #a78bfa;
+  }
+  .pkt.synack .label{ color: #a78bfa; }
+  .pkt.ack{
+    left: 26%; top: 198px; width: 48%;
+    border-color: #22d3ee;
+  }
+  .pkt.ack .label{ color: #22d3ee; }
+
+  .arrow{
+    position: absolute;
+    height: 2px;
+    pointer-events: none;
+  }
+  .arrow.syn{ left: 18%; right: 22%; top: 100px; background: linear-gradient(90deg, #22d3ee 30%, transparent); }
+  .arrow.synack{ left: 22%; right: 18%; top: 153px; background: linear-gradient(270deg, #a78bfa 30%, transparent); }
+  .arrow.ack{ left: 18%; right: 22%; top: 206px; background: linear-gradient(90deg, #22d3ee 30%, transparent); }
+
+  .established{
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    bottom: 12px;
+    padding: 6px 14px;
+    border: 1px solid #34d399;
+    background: rgba(52,211,153,0.10);
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: #34d399;
+  }
+
+  /* ─────── 右侧：标题 + tagline + 命令 ─────── */
+  .info{
+    display: flex; flex-direction: column;
+    gap: 22px;
+  }
+
+  .brand-mark{
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.2em;
+    color: #42b883;
+    text-transform: uppercase;
+  }
+  .brand-mark .dot{
+    width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, #42b883, #22d3ee);
+    box-shadow: 0 0 14px rgba(66,184,131,0.7);
+  }
+
+  .title{
+    font-family: 'Inter Tight', sans-serif;
+    font-weight: 800;
+    font-size: 58px;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    margin: 0;
+  }
+  .title .accent{
+    background: linear-gradient(95deg, #42b883 0%, #22d3ee 60%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .tagline{
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 18px;
+    line-height: 1.5;
+    color: #a8b3cc;
+    margin: 0;
+    max-width: 100%;
+  }
+  .tagline em{
+    font-style: normal;
+    color: #e8edf7;
+    background: linear-gradient(180deg, transparent 60%, rgba(66,184,131,0.30) 60%);
+    padding: 0 3px;
+  }
+
+  .cmd{
+    display: flex; align-items: center; gap: 12px;
+    background: #06090f;
+    border: 1px solid #2a3552;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 12px 36px -8px rgba(0,0,0,0.5);
+  }
+  .cmd .prompt{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    color: #42b883;
+    font-weight: 600;
+  }
+  .cmd code{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    color: #e8edf7;
+    font-weight: 500;
+  }
+  .cmd code .npx{ color: #fbbf24; }
+  .cmd code .pkg{ color: #22d3ee; }
+  .cmd .copy{
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #6a7693;
+    border: 1px solid #2a3552;
+    border-radius: 4px;
+    padding: 3px 6px;
+  }
+
+  .meta-row{
+    display: flex; gap: 18px;
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #6a7693;
+  }
+  .meta-row .item{ display: inline-flex; align-items: center; gap: 6px; }
+  .meta-row .item::before{
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; opacity: 0.6;
+  }
+  .meta-row .green{ color: #42b883; }
+  .meta-row .cyan{ color: #22d3ee; }
+  .meta-row .violet{ color: #a78bfa; }
+  .meta-row .amber{ color: #fbbf24; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ─────── 左侧：迷你 demo（TCP 三次握手） ─────── -->
+  <div class="stage">
+    <div class="stage-bar">
+      <span class="dot"></span>
+      <span>SCENE 03 · TCP 三次握手</span>
+      <div class="chips">
+        <div class="chip done"></div>
+        <div class="chip done"></div>
+        <div class="chip active"></div>
+        <div class="chip"></div>
+        <div class="chip"></div>
+        <div class="chip"></div>
+        <div class="chip"></div>
+        <div class="chip"></div>
+      </div>
+    </div>
+    <div class="stage-canvas">
+      <div class="col client">
+        <div class="col-box">Client<span class="sub">93.184.x.x:54321</span></div>
+        <div class="col-line"></div>
+      </div>
+      <div class="col server">
+        <div class="col-box">Server<span class="sub">216.34:443</span></div>
+        <div class="col-line"></div>
+      </div>
+
+      <div class="arrow syn"></div>
+      <div class="pkt syn">
+        <div class="label">SYN</div>
+        <div class="meta">seq=x</div>
+      </div>
+
+      <div class="arrow synack"></div>
+      <div class="pkt synack">
+        <div class="label">SYN + ACK</div>
+        <div class="meta">seq=y, ack=x+1</div>
+      </div>
+
+      <div class="arrow ack"></div>
+      <div class="pkt ack">
+        <div class="label">ACK</div>
+        <div class="meta">ack=y+1</div>
+      </div>
+
+      <div class="established">🔗 Connection Established</div>
+    </div>
+  </div>
+
+  <!-- ─────── 右侧：信息 ─────── -->
+  <div class="info">
+    <div class="brand-mark">
+      <span class="dot"></span>
+      <span>agent skill</span>
+    </div>
+
+    <h1 class="title">
+      把技术原理<br>
+      <span class="accent">演给你看。</span>
+    </h1>
+
+    <p class="tagline">
+      多场景动画 + <em>云希男声口播</em> + 一键导出 MP4。<br>
+      适配 Claude Code / Cursor / Codex 等 <em>50+ AI agent</em>。
+    </p>
+
+    <div class="cmd">
+      <span class="prompt">$</span>
+      <code><span class="npx">npx</span> skills add <span class="pkg">AgentBuff/animation-explainer</span></code>
+    </div>
+
+    <div class="meta-row">
+      <span class="item green">SVG 动画</span>
+      <span class="item cyan">edge-tts</span>
+      <span class="item violet">Playwright</span>
+      <span class="item amber">ffmpeg</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

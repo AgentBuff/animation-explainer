@@ -1,5 +1,9 @@
 # animation-explainer
 
+<p align="center">
+  <img src="social-preview/social-preview.png" alt="animation-explainer · 把技术原理演给你看" width="100%">
+</p>
+
 > 把看不见的技术过程，做成能看见的剧场式动画 HTML。
 
 这是一个跨 agent 的 **skill**：输入一个技术主题（"打开浏览器到屏幕上像素的全过程"、"一个 SQL 查询是怎么执行的"、"TLS 1.3 握手"…），它会产出一份**单文件 HTML 动画演示** —— 多场景、自动播放、章节导航、配真实代码/抓包/日志旁白、云希男声口播，可一键导出 MP4 视频。
