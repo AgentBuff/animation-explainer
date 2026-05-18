@@ -77,33 +77,6 @@
   .stage-corner{ position:absolute; top:12px; left:14px; font-family: var(--font-mono); font-size:11px; color: var(--muted); letter-spacing: 0.05em; }
   .stage-time{ position:absolute; bottom:12px; right:14px; font-family: var(--font-mono); font-size:11px; color: var(--muted); }
 
-  /* ───────── cover overlay（封面节专用） ───────── */
-  .cover-overlay{ position:absolute; inset:0; display:none;
-    flex-direction:column; justify-content:center; align-items:center;
-    padding: 40px 60px; text-align:center;
-    background: radial-gradient(ellipse at 50% 38%, rgba(34,211,238,0.06), transparent 65%), var(--surface);
-    z-index: 2; opacity:0; transition: opacity 0.5s ease; }
-  .cover-overlay.active{ display:flex; opacity:1; }
-  .cover-eyebrow{ font-family: var(--font-mono); font-size:11px; letter-spacing:0.34em;
-    color: var(--cyan); text-transform: uppercase; margin-bottom: 28px;
-    opacity:0; transform: translateY(-6px); transition: all 0.6s ease 0.1s; }
-  .cover-title{ font-family: var(--font-display); font-weight:700;
-    font-size: clamp(34px, 5vw, 56px); line-height:1.12; letter-spacing:-0.02em;
-    max-width: 900px; margin-bottom: 20px;
-    background: linear-gradient(135deg, #e8edf7 0%, #a8b3cc 100%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    opacity:0; transform: translateY(8px); transition: all 0.7s ease 0.25s; }
-  .cover-sub{ font-size: 16px; color: var(--text-dim); font-weight:400;
-    max-width: 680px; line-height:1.55;
-    opacity:0; transform: translateY(8px); transition: all 0.7s ease 0.45s; }
-  .cover-footnote{ position:absolute; bottom: 26px; font-family: var(--font-mono);
-    font-size: 10.5px; letter-spacing:0.22em; color: var(--muted); text-transform: uppercase;
-    opacity:0; transition: opacity 0.6s ease 0.8s; }
-  .cover-overlay.in .cover-eyebrow,
-  .cover-overlay.in .cover-title,
-  .cover-overlay.in .cover-sub,
-  .cover-overlay.in .cover-footnote{ opacity:1; transform: translateY(0); }
-
   .narrate{ background: var(--surface); border:1px solid var(--border); border-radius:16px;
     padding: 22px; display:flex; flex-direction:column; min-height:0; overflow:auto; }
   .narrate .scene-num{ font-family: var(--font-mono); font-size:11px; letter-spacing:0.15em; color: var(--vue); text-transform:uppercase; }
@@ -205,7 +178,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="dot"></span>
-      <span class="title" id="brandTitle">Vue 3 原理之旅</span>
+      <span class="title">Vue 3 原理之旅</span>
       <span class="sub">从 .vue 到屏幕上的像素 · 8 节</span>
     </div>
     <div class="progress">
@@ -219,16 +192,6 @@
     <div class="stage" id="stage">
       <div class="stage-corner"><span id="cornerIx">SCENE 01</span></div>
       <div class="stage-time" id="stageTime">00:00 / 00:00</div>
-
-      <!-- ════════════════════════════════════════════
-           COVER · 封面节
-           ════════════════════════════════════════════ -->
-      <div class="cover-overlay" id="coverOverlay">
-        <div class="cover-eyebrow">Animation Explainer</div>
-        <div class="cover-title" id="coverTitle"></div>
-        <div class="cover-sub" id="coverSub"></div>
-        <div class="cover-footnote">visualized &amp; narrated</div>
-      </div>
 
       <!-- ════════════════════════════════════════════
            SCENE 1 · 一个 .vue 文件
@@ -906,15 +869,6 @@
     <!-- ──────────────── Narration panel ──────────────── -->
     <aside class="narrate">
 
-      <div class="pane" data-pane="cover">
-        <div class="scene-num">封面 · COVER</div>
-        <h2>Vue 3 的内部世界</h2>
-        <p class="body">
-          这个视频用<em>八节动画</em>带你走一遍 Vue 3 的核心机制 — 从 <code>.vue</code> 文件被编译，到 <em>reactive</em> 用 Proxy 拦截读写，
-          再到 VNode 树的 diff 和 patch。看完你会知道：一行 <code>count++</code>，背后 Vue 都做了什么。
-        </p>
-      </div>
-
       <div class="pane" data-pane="1">
         <div class="scene-num">SCENE 01 · 起点</div>
         <h2>一个 .vue 文件</h2>
@@ -1125,8 +1079,6 @@
 "use strict";
 
 const CHAPTERS = [
-  { id:'cover', cover:true, title:"从 .vue 到屏幕上的像素", duration:8000,
-    narration:"欢迎来到 Vue 3 的内部世界。这八节动画，我们一起看 Vue 怎么把一个 vue 文件，变成屏幕上能动的界面。准备好，我们开始。" },
   { id:1, title:"一个 .vue 文件", duration:11000,
     narration:"一切从一行字开始。打开一个 vue 文件，你会看到模板、脚本、样式三段塞在一起，这就是 SFC，单文件组件。接下来七节，我们看看 Vue 怎么把它变成屏幕上能动的界面。" },
   { id:2, title:"编译：Template → Render", duration:14000,
@@ -1144,9 +1096,6 @@ const CHAPTERS = [
   { id:8, title:"Patch · 真实 DOM", duration:15000,
     narration:"最后一公里。renderer 把 VNode 翻译成浏览器的 DOM API。首次挂载是一连串 createElement。更新时只动会变的节点 —— patchFlag 说哪里变了，就只改哪里。这就是 Vue 性能的来源：编译期标注，加运行时精准更新。" },
 ];
-
-// 把 CHAPTERS 索引转成"去掉 cover 后"的 1-based scene 编号（对应 svg#scene-N 和 audio/scene-N.mp3）
-function sceneNum(i){ return CHAPTERS.slice(0, i + 1).filter(c => !c.cover).length; }
 
 const state = { index:0, playing:false, visited:new Set([0]), sceneTimer:null, sceneStart:0, rafId:null, ttsEnabled:true, ttsSpeaking:false };
 
@@ -1172,9 +1121,8 @@ if ('speechSynthesis' in window) {
 
 async function detectMp3(){
   if (useMp3 !== null) return useMp3;
-  const probe = CHAPTERS[0]?.cover ? 'audio/cover.mp3' : 'audio/scene-1.mp3';
   try {
-    const a = new Audio(probe);
+    const a = new Audio('audio/scene-1.mp3');
     await new Promise((resolve, reject) => {
       a.oncanplaythrough = resolve;
       a.onloadedmetadata = resolve;
@@ -1189,10 +1137,6 @@ async function detectMp3(){
     console.log('[TTS] MP3 not found → fallback to Web Speech API');
   }
   return useMp3;
-}
-function audioFor(idx){
-  const ch = CHAPTERS[idx];
-  return ch.cover ? 'audio/cover.mp3' : `audio/scene-${sceneNum(idx)}.mp3`;
 }
 
 function webSpeak(text, onEnd){
@@ -1212,7 +1156,7 @@ async function speak(text, idx, onEnd){
   stopSpeak();
   const can = await detectMp3();
   if (can) {
-    const a = new Audio(audioFor(idx));
+    const a = new Audio(`audio/scene-${idx+1}.mp3`);
     currentAudio = a;
     a.onplay  = () => { state.ttsSpeaking = true; };
     a.onended = () => {
@@ -1265,37 +1209,21 @@ function refreshChips(){
 
 function goTo(i){
   if (i < 0 || i >= CHAPTERS.length) return;
-  const ch = CHAPTERS[i];
   state.index = i; state.visited.add(i);
-
   document.querySelectorAll('svg.scene').forEach(svg => svg.classList.remove('active'));
-  const cov = document.getElementById('coverOverlay');
-  cov.classList.remove('active', 'in');
-
-  if (ch.cover) {
-    cov.classList.add('active');
-    requestAnimationFrame(() => requestAnimationFrame(() => cov.classList.add('in')));
-  } else {
-    document.getElementById(`scene-${sceneNum(i)}`).classList.add('active');
-  }
-
+  document.getElementById(`scene-${i+1}`).classList.add('active');
   document.querySelectorAll('.narrate .pane').forEach(p => p.classList.remove('active'));
-  const pane = document.querySelector(`.narrate .pane[data-pane="${ch.id}"]`);
-  if (pane) pane.classList.add('active');
-
-  document.getElementById('cornerIx').textContent = ch.cover ? 'COVER' : `SCENE ${String(sceneNum(i)).padStart(2,'0')}`;
+  document.querySelector(`.narrate .pane[data-pane="${i+1}"]`).classList.add('active');
+  document.getElementById('cornerIx').textContent = `SCENE ${String(i+1).padStart(2,'0')}`;
   document.getElementById('progressLabel').textContent = `${i+1}/${CHAPTERS.length}`;
   document.getElementById('progressFill').style.width = `${(i+1)/CHAPTERS.length * 100}%`;
-  document.getElementById('chapterTitle').innerHTML = ch.cover
-    ? `<b>封面</b> · ${ch.title || '欢迎'}`
-    : `<b>第 ${sceneNum(i)} 节</b> · ${ch.title}`;
+  document.getElementById('chapterTitle').innerHTML = `<b>第 ${i+1} 节</b> · ${CHAPTERS[i].title}`;
   refreshChips();
-  resetSceneTimer();
-  if (!ch.cover) runScene(sceneNum(i));
+  resetSceneTimer(); runScene(i+1);
   if (state.playing) {
     startCurrentScene();
   } else {
-    speak(ch.narration, i);
+    speak(CHAPTERS[i].narration, i);
   }
 }
 // ────────────── 自动推进（按口播结束驱动） ──────────────
@@ -1367,16 +1295,9 @@ document.getElementById('btnNext').onclick = () => goTo(state.index + 1);
 document.getElementById('btnPlay').onclick = togglePlay;
 function restartCurrent(){
   resetSceneTimer();
-  const ch = CHAPTERS[state.index];
-  if (ch.cover) {
-    const cov = document.getElementById('coverOverlay');
-    cov.classList.remove('in');
-    requestAnimationFrame(() => requestAnimationFrame(() => cov.classList.add('in')));
-  } else {
-    runScene(sceneNum(state.index));
-  }
+  runScene(state.index + 1);
   if (state.playing) startCurrentScene();
-  else speak(ch.narration, state.index);
+  else speak(CHAPTERS[state.index].narration, state.index);
 }
 document.getElementById('btnRestart').onclick = restartCurrent;
 document.getElementById('btnMute').onclick = () => {
@@ -1590,16 +1511,6 @@ function scene8(){
     setTimeout(() => blink.setAttribute('opacity','0'), 800);
   }, 7600);
 }
-
-// 封面文本：大标题来自 brand .title，副标题来自 CHAPTERS 里第一个 cover 节的 title
-(function initCover(){
-  const cov = CHAPTERS.find(c => c.cover);
-  if (!cov) return;
-  const brandT = document.getElementById('brandTitle')?.textContent.trim()
-              || document.title.trim();
-  document.getElementById('coverTitle').textContent = brandT;
-  document.getElementById('coverSub').textContent = cov.title || '';
-})();
 
 // 初始化：先把 playing 设上，再 goTo(0)
 // 这样 goTo 内部就会走 startCurrentScene() 路径，避免连续 speak 两次

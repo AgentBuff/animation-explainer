@@ -162,33 +162,6 @@
     color: var(--muted);
   }
 
-  /* ───────── cover overlay（封面节专用） ───────── */
-  .cover-overlay{ position:absolute; inset:0; display:none;
-    flex-direction:column; justify-content:center; align-items:center;
-    padding: 40px 60px; text-align:center;
-    background: radial-gradient(ellipse at 50% 38%, rgba(34,211,238,0.06), transparent 65%), var(--surface);
-    z-index: 2; opacity:0; transition: opacity 0.5s ease; }
-  .cover-overlay.active{ display:flex; opacity:1; }
-  .cover-eyebrow{ font-family: var(--font-mono); font-size:11px; letter-spacing:0.34em;
-    color: var(--cyan); text-transform: uppercase; margin-bottom: 28px;
-    opacity:0; transform: translateY(-6px); transition: all 0.6s ease 0.1s; }
-  .cover-title{ font-family: var(--font-display); font-weight:700;
-    font-size: clamp(34px, 5vw, 56px); line-height:1.12; letter-spacing:-0.02em;
-    max-width: 900px; margin-bottom: 20px;
-    background: linear-gradient(135deg, #e8edf7 0%, #a8b3cc 100%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    opacity:0; transform: translateY(8px); transition: all 0.7s ease 0.25s; }
-  .cover-sub{ font-size: 16px; color: var(--text-dim); font-weight:400;
-    max-width: 680px; line-height:1.55;
-    opacity:0; transform: translateY(8px); transition: all 0.7s ease 0.45s; }
-  .cover-footnote{ position:absolute; bottom: 26px; font-family: var(--font-mono);
-    font-size: 10.5px; letter-spacing:0.22em; color: var(--muted); text-transform: uppercase;
-    opacity:0; transition: opacity 0.6s ease 0.8s; }
-  .cover-overlay.in .cover-eyebrow,
-  .cover-overlay.in .cover-title,
-  .cover-overlay.in .cover-sub,
-  .cover-overlay.in .cover-footnote{ opacity:1; transform: translateY(0); }
-
   /* Narration */
   .narrate{
     background: var(--surface);
@@ -401,7 +374,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="dot"></span>
-      <span class="title" id="brandTitle">浏览器请求的底层之旅</span>
+      <span class="title">浏览器请求的底层之旅</span>
       <span class="sub">从一行 URL 到屏幕上的像素 · 8 节</span>
     </div>
     <div class="progress">
@@ -415,16 +388,6 @@
     <div class="stage" id="stage">
       <div class="stage-corner"><span class="ix" id="cornerIx">SCENE 01</span></div>
       <div class="stage-time" id="stageTime">00:00 / 00:00</div>
-
-      <!-- ═══════════════════════════════════════════════════════════════
-           COVER · 封面节
-           ═══════════════════════════════════════════════════════════════ -->
-      <div class="cover-overlay" id="coverOverlay">
-        <div class="cover-eyebrow">Animation Explainer</div>
-        <div class="cover-title" id="coverTitle"></div>
-        <div class="cover-sub" id="coverSub"></div>
-        <div class="cover-footnote">visualized &amp; narrated</div>
-      </div>
 
       <!-- ═══════════════════════════════════════════════════════════════
            SCENE 1 · 序章：你输入了一个 URL
@@ -894,15 +857,6 @@
     <!-- ──────────────── Narration panel ──────────────── -->
     <aside class="narrate">
 
-      <div class="pane" data-pane="cover">
-        <div class="scene-num">封面 · COVER</div>
-        <h2>一行 URL 背后发生的一切</h2>
-        <p class="body">
-          这八节动画，我们一起拆开 <code>https://example.com</code> 这一行字。
-          从 <em>DNS、TCP、TLS</em>，到 HTTP 报文、服务器内部处理、浏览器渲染上屏 —— 把按下回车后的<em>每一步</em>都画给你看。
-        </p>
-      </div>
-
       <div class="pane" data-pane="1">
         <div class="scene-num">SCENE 01 · 起点</div>
         <h2>你按下了回车键</h2>
@@ -1085,8 +1039,6 @@ Total             <span class="n">187ms</span>  <span class="c">✓ 已上屏</s
 // 章节数据
 // ───────────────────────────────────────────────────────
 const CHAPTERS = [
-  { id:'cover', cover:true, title:"从一行 URL 到屏幕上的像素", duration:8000,
-    narration:"欢迎来到浏览器请求的底层之旅。这八节动画，我们一起拆开 https 冒号 example.com 这一行字。看看按下回车的那一瞬间，背后到底发生了什么。" },
   { id:1, title:"你按下了回车键", duration:11000,
     narration:"一切从一行字开始。https 冒号 example.com 看起来只是地址栏里的几个字符。但按下回车的瞬间，背后正在动员一整套互联网基础设施。" },
   { id:2, title:"DNS：名字翻译", duration:14000,
@@ -1104,9 +1056,6 @@ const CHAPTERS = [
   { id:8, title:"浏览器渲染上屏", duration:14000,
     narration:"浏览器把 HTML 解析成 DOM 树，CSS 解析成 CSSOM 树。两棵树合并成 Render Tree。接着 Layout 算出每个盒子的位置和尺寸，Paint 涂色并切分图层，最后由 GPU 合成。像素终于出现在屏幕上。整段旅程通常不到 200 毫秒。" },
 ];
-
-// 把 CHAPTERS 索引转成"去掉 cover 后"的 1-based scene 编号（对应 svg#scene-N 和 audio/scene-N.mp3）
-function sceneNum(i){ return CHAPTERS.slice(0, i + 1).filter(c => !c.cover).length; }
 
 // ───────────────────────────────────────────────────────
 // 状态机
@@ -1142,9 +1091,8 @@ if ('speechSynthesis' in window) {
 
 async function detectMp3(){
   if (useMp3 !== null) return useMp3;
-  const probe = CHAPTERS[0]?.cover ? 'audio/cover.mp3' : 'audio/scene-1.mp3';
   try {
-    const a = new Audio(probe);
+    const a = new Audio('audio/scene-1.mp3');
     await new Promise((resolve, reject) => {
       a.oncanplaythrough = resolve;
       a.onloadedmetadata = resolve;
@@ -1173,17 +1121,12 @@ function webSpeak(text, onEnd){
   speechSynthesis.speak(u);
 }
 
-function audioFor(idx){
-  const ch = CHAPTERS[idx];
-  return ch.cover ? 'audio/cover.mp3' : `audio/scene-${sceneNum(idx)}.mp3`;
-}
-
 async function speak(text, idx, onEnd){
   if (!state.ttsEnabled || !text) { onEnd && onEnd(); return; }
   stopSpeak();
   const can = await detectMp3();
   if (can) {
-    const a = new Audio(audioFor(idx));
+    const a = new Audio(`audio/scene-${idx+1}.mp3`);
     currentAudio = a;
     a.onplay  = () => { state.ttsSpeaking = true; };
     a.onended = () => {
@@ -1242,42 +1185,31 @@ function refreshChips(){
 // ───────────────────────────────────────────────────────
 function goTo(i){
   if (i < 0 || i >= CHAPTERS.length) return;
-  const ch = CHAPTERS[i];
   state.index = i;
   state.visited.add(i);
 
-  // 切换 SVG / cover
+  // 切换 SVG
   document.querySelectorAll('svg.scene').forEach(svg => svg.classList.remove('active'));
-  const cov = document.getElementById('coverOverlay');
-  cov.classList.remove('active', 'in');
-  if (ch.cover) {
-    cov.classList.add('active');
-    requestAnimationFrame(() => requestAnimationFrame(() => cov.classList.add('in')));
-  } else {
-    document.getElementById(`scene-${sceneNum(i)}`).classList.add('active');
-  }
+  document.getElementById(`scene-${i+1}`).classList.add('active');
 
   // 切换文案
   document.querySelectorAll('.narrate .pane').forEach(p => p.classList.remove('active'));
-  const pane = document.querySelector(`.narrate .pane[data-pane="${ch.id}"]`);
-  if (pane) pane.classList.add('active');
+  document.querySelector(`.narrate .pane[data-pane="${i+1}"]`).classList.add('active');
 
   // 更新 UI
-  document.getElementById('cornerIx').textContent = ch.cover ? 'COVER' : `SCENE ${String(sceneNum(i)).padStart(2,'0')}`;
+  document.getElementById('cornerIx').textContent = `SCENE ${String(i+1).padStart(2,'0')}`;
   document.getElementById('progressLabel').textContent = `${i+1}/${CHAPTERS.length}`;
   document.getElementById('progressFill').style.width = `${(i+1)/CHAPTERS.length * 100}%`;
-  document.getElementById('chapterTitle').innerHTML = ch.cover
-    ? `<b>封面</b> · ${ch.title || '欢迎'}`
-    : `<b>第 ${sceneNum(i)} 节</b> · ${ch.title}`;
+  document.getElementById('chapterTitle').innerHTML = `<b>第 ${i+1} 节</b> · ${CHAPTERS[i].title}`;
   refreshChips();
 
   // 重置 scene 计时
   resetSceneTimer();
-  if (!ch.cover) runScene(sceneNum(i));
+  runScene(i+1);
   if (state.playing) {
     startCurrentScene();
   } else {
-    speak(ch.narration, i);
+    speak(CHAPTERS[i].narration, i);
   }
 }
 
@@ -1345,16 +1277,9 @@ function updatePlayBtn(){
 // ───────────────────────────────────────────────────────
 function restartCurrent(){
   resetSceneTimer();
-  const ch = CHAPTERS[state.index];
-  if (ch.cover) {
-    const cov = document.getElementById('coverOverlay');
-    cov.classList.remove('in');
-    requestAnimationFrame(() => requestAnimationFrame(() => cov.classList.add('in')));
-  } else {
-    runScene(sceneNum(state.index));
-  }
+  runScene(state.index + 1);
   if (state.playing) startCurrentScene();
-  else speak(ch.narration, state.index);
+  else speak(CHAPTERS[state.index].narration, state.index);
 }
 document.getElementById('btnPrev').onclick = () => goTo(state.index - 1);
 document.getElementById('btnNext').onclick = () => goTo(state.index + 1);
@@ -1617,16 +1542,6 @@ function scene8(){
   showEl('paintBlk',   5500);
   showEl('finalPage',  6700);
 }
-
-// 封面文本：大标题来自 brand .title，副标题来自 CHAPTERS 里第一个 cover 节的 title
-(function initCover(){
-  const cov = CHAPTERS.find(c => c.cover);
-  if (!cov) return;
-  const brandT = document.getElementById('brandTitle')?.textContent.trim()
-              || document.title.trim();
-  document.getElementById('coverTitle').textContent = brandT;
-  document.getElementById('coverSub').textContent = cov.title || '';
-})();
 
 // ───────────────────────────────────────────────────────
 // 初始化：先 playing=true，再 goTo(0) — 让 goTo 内部走 startCurrentScene()

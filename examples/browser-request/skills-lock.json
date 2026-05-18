@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "animation-explainer": {
+      "source": "AgentBuff/animation-explainer",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "ad6ffae88cb9dc6b764f4a91f6eb3beefc9410d8566ee825af2060d37fa5816d"
+    }
+  }
+}

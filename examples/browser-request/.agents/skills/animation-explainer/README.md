@@ -1,8 +1,28 @@
 # animation-explainer
 
+<p align="center">
+  <img src="social-preview/social-preview.png" alt="animation-explainer · 把技术原理演给你看" width="100%">
+</p>
+
 > 把看不见的技术过程，做成能看见的剧场式动画 HTML。
 
-这是一个 Claude Code **skill**：输入一个技术主题（"打开浏览器到屏幕上像素的全过程"、"一个 SQL 查询是怎么执行的"、"TLS 1.3 握手"…），它会产出一份**单文件 HTML 动画演示** —— 多场景、自动播放、章节导航、配真实代码/抓包/日志旁白。
+这是一个跨 agent 的 **skill**：输入一个技术主题（"打开浏览器到屏幕上像素的全过程"、"一个 SQL 查询是怎么执行的"、"TLS 1.3 握手"…），它会产出一份**单文件 HTML 动画演示** —— 多场景、自动播放、章节导航、配真实代码/抓包/日志旁白、云希男声口播，可一键导出 MP4 视频。
+
+## 一键安装（推荐）
+
+```bash
+npx skills add AgentBuff/animation-explainer
+```
+
+适配 **Claude Code / Cursor / Codex / Cline / Gemini CLI / Windsurf / Antigravity / OpenClaw** 等 50+ agent，一次安装全部生效（背后是 [skills.sh](https://skills.sh) 跨 agent 协议）。
+
+装完后跟你的 agent 说：
+
+> 用 animation-explainer 给我做一个 **[主题]** 的动画演示
+
+例如："用 animation-explainer 做一个 git rebase 的动画演示"、"用 animation-explainer 把 V8 JS 编译过程讲清楚"。
+
+> 如果要导出 MP4 视频，还需要本地装 `ffmpeg` 和 `npx playwright install chromium`，详见下方"导出 MP4"那节。
 
 ## 现在能干什么
 

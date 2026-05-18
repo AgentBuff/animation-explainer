@@ -49,41 +49,27 @@ try {
   process.exit(1);
 }
 
-// 从 HTML 里抠出 CHAPTERS 数组：把每个顶层 chapter 对象 { ... narration: "..." ... } 整块抓出，
-// 这样可以同时拿到 narration 和该 chapter 的其他字段（如 cover:true）
-const chunkRe = /\{([^{}]*?narration\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*?)\}/g;
-const items = [];
-let cm;
-while ((cm = chunkRe.exec(html))) {
-  const chunk = cm[1];
-  const narrM = chunk.match(/narration\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (!narrM) continue;
-  const text = narrM[1]
+// 从 HTML 里抠出 CHAPTERS 数组中所有 narration: "..." 字符串
+const narrations = [];
+const re = /narration\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+let m;
+while ((m = re.exec(html))) {
+  const text = m[1]
     .replace(/\\"/g, '"')
     .replace(/\\n/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  const isCover = /\bcover\s*:\s*true\b/.test(chunk);
-  items.push({ text, cover: isCover });
+  narrations.push(text);
 }
 
-if (!items.length) {
+if (!narrations.length) {
   console.error(`❌ 在 ${htmlPath} 里没找到 CHAPTERS 的 narration 字段`);
   process.exit(1);
 }
 
-// 给每项算输出文件名：cover 节 → cover.mp3；其他节 → scene-N.mp3（N 是去掉 cover 后的 1-based 序号）
-let sceneIdx = 0;
-for (const it of items) {
-  if (it.cover) it.filename = 'cover.mp3';
-  else { sceneIdx += 1; it.filename = `scene-${sceneIdx}.mp3`; }
-}
-
 console.log(`📖 ${targetDir}`);
 console.log(`🎙️  voice: ${voice}    rate: ${rate}`);
-const coverCount = items.filter(it => it.cover).length;
-const sceneCount = items.length - coverCount;
-console.log(`📝 ${items.length} 段口播稿 (${coverCount ? '含 1 节封面 + ' : ''}${sceneCount} 节正片)\n`);
+console.log(`📝 ${narrations.length} 节口播稿\n`);
 
 const audioDir = path.join(targetDir, 'audio');
 await mkdir(audioDir, { recursive: true });
@@ -91,15 +77,15 @@ await mkdir(audioDir, { recursive: true });
 const tts = new MsEdgeTTS();
 await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
 
-for (let i = 0; i < items.length; i++) {
-  const it = items[i];
-  const outPath = path.join(audioDir, it.filename);
-  const preview = it.text.slice(0, 28) + (it.text.length > 28 ? '…' : '');
-  process.stdout.write(`  [${i + 1}/${items.length}] ${preview}  `);
+for (let i = 0; i < narrations.length; i++) {
+  const outPath = path.join(audioDir, `scene-${i + 1}.mp3`);
+  const text = narrations[i];
+  const preview = text.slice(0, 28) + (text.length > 28 ? '…' : '');
+  process.stdout.write(`  [${i + 1}/${narrations.length}] ${preview}  `);
   try {
-    const { audioStream } = tts.toStream(it.text, { rate });
+    const { audioStream } = tts.toStream(text, { rate });
     await pipeline(audioStream, createWriteStream(outPath));
-    console.log(`✓ ${it.filename}`);
+    console.log(`✓ scene-${i + 1}.mp3`);
   } catch (e) {
     console.log(`✗ ${e.message || e}`);
   }

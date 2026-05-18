@@ -1,0 +1,44 @@
+{
+  "name": "animation-explainer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "多场景动画 HTML 技术演绎 skill — 含云希男声 TTS 旁白 + 一键导出 MP4。适配 Claude Code / Cursor / Codex 等 50+ agent。",
+  "license": "MIT",
+  "author": "AgentBuff",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AgentBuff/animation-explainer.git"
+  },
+  "homepage": "https://github.com/AgentBuff/animation-explainer#readme",
+  "bugs": {
+    "url": "https://github.com/AgentBuff/animation-explainer/issues"
+  },
+  "keywords": [
+    "agent-skill",
+    "claude-code",
+    "cursor",
+    "codex",
+    "animation",
+    "tts",
+    "edge-tts",
+    "ffmpeg",
+    "explainer",
+    "educational",
+    "svg",
+    "playwright"
+  ],
+  "scripts": {
+    "audio": "node scripts/generate-audio.mjs",
+    "audio:vue": "node scripts/generate-audio.mjs examples/vue-internals",
+    "audio:browser": "node scripts/generate-audio.mjs examples/browser-request",
+    "video": "node scripts/export-video.mjs",
+    "video:vue": "node scripts/export-video.mjs examples/vue-internals",
+    "video:browser": "node scripts/export-video.mjs examples/browser-request",
+    "video:install": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.5",
+    "playwright": "^1.50.0"
+  }
+}
